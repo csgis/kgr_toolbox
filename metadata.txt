@@ -1,0 +1,17 @@
+[general]
+name=PostgreSQL Template Manager
+qgisMinimumVersion=3.0
+description=Manage PostgreSQL database templates - create templates from existing databases without data and create new databases from templates
+version=1.0.0
+author=Toni Schönbuchner
+email=toni.schoenbuchner@csgis.de
+about=A QGIS plugin for managing PostgreSQL database templates. Create templates from existing databases without data and create new databases from existing templates.
+tracker=https://github.com/csgis/postgresql-template-manager/issues
+repository=https://github.com/csgis/postgresql-template-manager
+tags=postgresql,database,template,management
+homepage=https://github.com/csgis/postgresql-template-manager
+category=Database
+icon=icon.png
+experimental=False
+deprecated=False
+hasProcessingProvider=no
