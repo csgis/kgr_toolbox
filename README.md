@@ -1,15 +1,15 @@
-# KGR Toolbox
+# <img src="icon.png" height="25"> KGR Toolbox
 
 A QGIS plugin for managing PostgreSQL database templates and creating portable project archives.
 
 ## Features
 
-### 🗄️ PostgreSQL Template Management
+### PostgreSQL Template Management
 - **Create Templates**: Generate database templates from existing PostgreSQL databases without data
 - **Deploy Templates**: Create new databases from existing templates
 - **Schema Preservation**: Maintain all database structure, constraints, and relationships
 
-### 📦 Portable Project Archives
+### Portable Project Archives
 - **PostgreSQL to Geopackage**: Convert all PostgreSQL layers to a single portable geopackage
 - **Complete Project Export**: Copy all project files including DCIM folders and media and updates source references
 
