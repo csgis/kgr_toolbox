@@ -6,8 +6,10 @@ Enhanced with connection handling and user warnings.
 from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import (QVBoxLayout, QHBoxLayout, QFormLayout, 
                                 QComboBox, QLineEdit, QPushButton, QGroupBox,
-                                QListWidget, QMessageBox, QDialog, QDialogButtonBox,
-                                QLabel, QTextEdit)
+                                QTableWidget, QTableWidgetItem, QMessageBox, QDialog, QDialogButtonBox,
+                                QLabel, QTextEdit, QHeaderView)
+from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QFont
 from .base_tab import BaseTab
 
 
@@ -98,6 +100,34 @@ class TemplatesTab(BaseTab):
     def setup_ui(self):
         """Setup the templates tab UI."""
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title and help button section
+        title_layout = QHBoxLayout()
+        title_label = QLabel("PostgreSQL Template Manager")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        
+        self.help_btn = QPushButton("Help")
+        self.help_btn.setFixedWidth(80)
+        self.help_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #2196F3; "
+            "color: white; "
+            "font-weight: bold; "
+            "padding: 5px 10px; "
+            "border: none; "
+            "border-radius: 4px; "
+            "font-size: 12px; "
+            "} "
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        self.help_btn.clicked.connect(self._show_help_popup)
+        
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(self.help_btn)
+        layout.addLayout(title_layout)
         
         # Create template section
         create_group = QGroupBox("Create Template")
@@ -105,11 +135,17 @@ class TemplatesTab(BaseTab):
         
         self.source_db_combo = QComboBox()
         self.template_name_edit = QLineEdit()
+        
+        # Add comment field
+        self.template_comment_edit = QLineEdit()
+        self.template_comment_edit.setPlaceholderText("Optional description for the template (e.g., 'Production schema template for project X')")
+        
         self.create_template_btn = QPushButton("Create Template")
         self.create_template_btn.clicked.connect(self.create_template)
         
         create_layout.addRow("Source Database:", self.source_db_combo)
         create_layout.addRow("Template Name:", self.template_name_edit)
+        create_layout.addRow("Comment:", self.template_comment_edit)
         create_layout.addWidget(self.create_template_btn)
         
         layout.addWidget(create_group)
@@ -129,11 +165,57 @@ class TemplatesTab(BaseTab):
         btn_layout.addWidget(self.delete_template_btn)
         list_layout.addLayout(btn_layout)
         
-        # Templates list
-        self.templates_list = QListWidget()
-        list_layout.addWidget(self.templates_list)
+        # Templates table
+        self.templates_table = QTableWidget()
+        self.templates_table.setColumnCount(2)
+        self.templates_table.setHorizontalHeaderLabels(["Template Name", "Comment"])
+        self.templates_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.templates_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.templates_table.horizontalHeader().setStretchLastSection(True)
+        self.templates_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.templates_table.setSortingEnabled(True)
+        list_layout.addWidget(self.templates_table)
         
         layout.addWidget(list_group)
+
+    def _show_help_popup(self):
+        """Show help information in a popup dialog."""
+        help_text = (
+            "<h3>PostgreSQL Template Manager</h3>"
+            "<p>Create and manage PostgreSQL database templates for rapid deployment of pre-configured databases.</p>"
+            "<h4>What is a PostgreSQL Template?</h4>"
+            "<p>A <b>template database</b> is a blueprint used to create new databases with a predefined structure, "
+            "including tables, views, functions, and extensions, but <b>without any data</b>.</p>"
+            "<h4>How this tool works:</h4>"
+            "<ol>"
+            "<li><b>Select source database:</b> Choose an existing database with the desired structure</li>"
+            "<li><b>Name the template:</b> Give your template a descriptive name</li>"
+            "<li><b>Add comment (optional):</b> Provide a description to help identify the template's purpose, "
+            "such as 'Production schema for customer management system' or 'Development environment template'</li>"
+            "<li><b>Structure copied:</b> All tables, views, functions, indexes are copied</li>"
+            "<li><b>Data removed:</b> Template contains no records (empty tables)</li>"
+            "<li><b>Template ready:</b> Use template to create new databases instantly</li>"
+            "</ol>"
+            "<h4>Template Comments:</h4>"
+            "<p>The <b>comment field</b> allows you to add a descriptive note to your template that will be stored "
+            "in the PostgreSQL database catalog. This helps you and other users understand the purpose and content "
+            "of each template. Comments are especially useful when managing multiple templates.</p>"
+            "<h4>⚠️ Important notes:</h4>"
+            "<ul>"
+            "<li><b>Active connections:</b> All connections to source database will be dropped during creation</li>"
+            "<li><b>Structure only:</b> Templates preserve schema but remove all data</li>"
+            "<li><b>PostgreSQL feature:</b> Uses native PostgreSQL template functionality</li>"
+            "<li><b>Comments are permanent:</b> Once set, comments become part of the database metadata</li>"
+            "</ul>"
+        )
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Help - PostgreSQL Template Manager")
+        msg.setTextFormat(1)  # Rich text format
+        msg.setText(help_text)
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
     
     def connect_signals(self):
         """Connect signals."""
@@ -141,17 +223,37 @@ class TemplatesTab(BaseTab):
         self.db_manager.operation_finished.connect(self.on_operation_finished)
     
     def refresh_templates(self):
-        """Refresh templates list."""
+        """Refresh templates table with comments."""
         if not self.check_connection():
             return
         
         try:
-            templates = self.db_manager.get_templates()
-            self.templates_list.clear()
-            self.templates_list.addItems(templates)
+            templates_with_comments = self.db_manager.get_templates_with_comments()
+            self.templates_table.setRowCount(0)  # Clear existing rows
             
-            self.emit_log(f"Refreshed templates: {len(templates)} found")
-            self.templates_refreshed.emit(templates)
+            template_names = []
+            for row, (template_name, comment) in enumerate(templates_with_comments):
+                template_names.append(template_name)
+                
+                # Debug: Log what we're getting
+                self.emit_log(f"Debug: Template '{template_name}', Comment: '{comment}'")
+                
+                # Insert new row
+                self.templates_table.insertRow(row)
+                
+                # Template name item
+                name_item = QTableWidgetItem(template_name)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+                self.templates_table.setItem(row, 0, name_item)
+                
+                # Comment item
+                comment_text = comment if comment else "(No comment)"
+                comment_item = QTableWidgetItem(comment_text)
+                comment_item.setFlags(comment_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+                self.templates_table.setItem(row, 1, comment_item)
+            
+            self.emit_log(f"Refreshed templates: {len(templates_with_comments)} found")
+            self.templates_refreshed.emit(template_names)
         except Exception as e:
             self.emit_log(f"Error refreshing templates: {str(e)}")
     
@@ -167,6 +269,7 @@ class TemplatesTab(BaseTab):
         
         source_db = self.source_db_combo.currentText()
         template_name = self.template_name_edit.text().strip()
+        template_comment = self.template_comment_edit.text().strip()
         
         if not self.validate_selection(self.source_db_combo, "source database"):
             return
@@ -201,11 +304,16 @@ class TemplatesTab(BaseTab):
                 self.emit_log(f"User confirmed dropping {connection_count} connections to '{source_db}'")
             else:
                 # No active connections, but still show a confirmation
+                confirmation_text = f"Create template '{template_name}' from database '{source_db}'?\n\n"
+                confirmation_text += "This will create a copy of the database structure without data."
+                
+                if template_comment:
+                    confirmation_text += f"\n\nComment: {template_comment}"
+                
                 reply = QMessageBox.question(
                     self,
                     "Create Template",
-                    f"Create template '{template_name}' from database '{source_db}'?\n\n"
-                    "This will create a copy of the database structure without data.",
+                    confirmation_text,
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
@@ -215,7 +323,7 @@ class TemplatesTab(BaseTab):
             
             # Proceed with template creation
             self.emit_progress_started()
-            self.db_manager.create_template(source_db, template_name)
+            self.db_manager.create_template(source_db, template_name, template_comment)
             
         except Exception as e:
             self.emit_log(f"Error checking connections: {str(e)}")
@@ -226,12 +334,18 @@ class TemplatesTab(BaseTab):
         if not self.check_connection():
             return
         
-        current_item = self.templates_list.currentItem()
-        if not current_item:
+        current_row = self.templates_table.currentRow()
+        if current_row == -1:
             self.show_warning("Please select a template to delete.")
             return
         
-        template_name = current_item.text()
+        # Get the template name from the first column
+        template_name_item = self.templates_table.item(current_row, 0)
+        if not template_name_item:
+            self.show_warning("Could not retrieve template name.")
+            return
+        
+        template_name = template_name_item.text()
         
         if self.confirm_action("Confirm Delete", 
                               f"Are you sure you want to delete template '{template_name}'?\n"
@@ -247,12 +361,16 @@ class TemplatesTab(BaseTab):
             if success:
                 self.emit_log(f"✓ {message}")
                 self.template_name_edit.clear()
+                self.template_comment_edit.clear()
                 self.refresh_templates()
             else:
                 self.emit_log(f"✗ {message}")
     
     def get_template_names(self):
         """Get list of current template names."""
-        return [self.templates_list.item(i).text() 
-                for i in range(self.templates_list.count())]
-    
+        template_names = []
+        for row in range(self.templates_table.rowCount()):
+            name_item = self.templates_table.item(row, 0)
+            if name_item:
+                template_names.append(name_item.text())
+        return template_names

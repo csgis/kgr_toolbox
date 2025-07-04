@@ -4,7 +4,7 @@ from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
 from qgis.core import QgsApplication
 from .database_manager import DatabaseManager
-from .dialog import PostgreSQLTemplateManagerDialog
+from .dialog import KgrToolBoxDialog
 
 
 class KgrToolbox:
@@ -98,7 +98,7 @@ class KgrToolbox:
     def run(self):
         """Run method that performs all the real work."""
         if not self.dialog:
-            self.dialog = PostgreSQLTemplateManagerDialog(self.db_manager, self.iface.mainWindow())
+            self.dialog = KgrToolBoxDialog(self.db_manager, self.iface.mainWindow())
         
         # Show the dialog as a dock widget
         self.iface.addDockWidget(self.dialog.dock_area, self.dialog)

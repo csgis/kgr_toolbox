@@ -7,10 +7,11 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from PIL import Image, ImageOps
 from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton,
-    QLabel, QFileDialog, QProgressBar
+    QLabel, QFileDialog, QProgressBar, QMessageBox, QCheckBox, QSpinBox
 )
 from qgis.PyQt.QtGui import QFont
 from qgis.core import QgsProject, QgsVectorLayer, QgsVectorFileWriter
@@ -25,17 +26,31 @@ class ArchiveProjectTab(BaseTab):
         layout.setSpacing(15)  # Reduce spacing between elements
         layout.setContentsMargins(20, 20, 20, 20)  # Add margins around the whole layout
 
-        # Instructions section
-        instructions = QLabel(
-            "Export the current project as a portable archive.\n"
-            "All PostgreSQL layers will be converted to a single Geopackage."
+        # Title and help button section
+        title_layout = QHBoxLayout()
+        title_label = QLabel("Portable Project Archiver")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        
+        self.help_btn = QPushButton("Help")
+        self.help_btn.setFixedWidth(80)
+        self.help_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #2196F3; "
+            "color: white; "
+            "font-weight: bold; "
+            "padding: 5px 10px; "
+            "border: none; "
+            "border-radius: 4px; "
+            "font-size: 12px; "
+            "} "
+            "QPushButton:hover { background-color: #1976D2; }"
         )
-        instructions.setWordWrap(True)
-        font = QFont()
-        font.setItalic(True)
-        instructions.setFont(font)
-        instructions.setStyleSheet("color: #666; margin-bottom: 10px;")
-        layout.addWidget(instructions)
+        self.help_btn.clicked.connect(self._show_help_popup)
+        
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(self.help_btn)
+        layout.addLayout(title_layout)
 
         # Output folder section
         folder_group = QVBoxLayout()
@@ -56,6 +71,39 @@ class ArchiveProjectTab(BaseTab):
         folder_group.addLayout(folder_layout)
         
         layout.addLayout(folder_group)
+
+        # Image resize options section
+        image_group = QVBoxLayout()
+        image_group.setSpacing(8)
+        
+        # Resize images checkbox
+        self.resize_images_checkbox = QCheckBox("Resize images")
+        self.resize_images_checkbox.setStyleSheet("font-weight: bold;")
+        self.resize_images_checkbox.toggled.connect(self._on_resize_checkbox_toggled)
+        image_group.addWidget(self.resize_images_checkbox)
+        
+        # Pixel size input
+        pixel_layout = QHBoxLayout()
+        pixel_layout.setSpacing(10)
+        self.pixel_label = QLabel("Pixel of long side:")
+        self.pixel_label.setEnabled(False)
+        self.pixel_spinbox = QSpinBox()
+        self.pixel_spinbox.setRange(100, 10000)
+        self.pixel_spinbox.setValue(300)
+        self.pixel_spinbox.setSuffix(" px")
+        self.pixel_spinbox.setEnabled(False)
+        pixel_layout.addWidget(self.pixel_label)
+        pixel_layout.addWidget(self.pixel_spinbox)
+        pixel_layout.addStretch()
+        image_group.addLayout(pixel_layout)
+        
+        # Warning label
+        self.resize_warning_label = QLabel("⚠️ Resizing many images can take considerable time")
+        self.resize_warning_label.setStyleSheet("color: #FF9800; font-size: 11px; font-style: italic;")
+        self.resize_warning_label.setVisible(False)
+        image_group.addWidget(self.resize_warning_label)
+        
+        layout.addLayout(image_group)
 
         # Archive button
         self.archive_btn = QPushButton("Create Portable Archive")
@@ -111,6 +159,50 @@ class ArchiveProjectTab(BaseTab):
         
         self.setLayout(layout)
 
+    def _on_resize_checkbox_toggled(self, checked):
+        """Handle resize checkbox toggle"""
+        self.pixel_label.setEnabled(checked)
+        self.pixel_spinbox.setEnabled(checked)
+        self.resize_warning_label.setVisible(checked)
+
+    def _show_help_popup(self):
+        """Show help information in a popup dialog."""
+        help_text = (
+            "<h3>Portable Project Archiver</h3>"
+            "<p>Creates a completely self-contained, portable version of your current QGIS project.</p>"
+            "<h4>What happens during archiving:</h4>"
+            "<ul>"
+            "<li><b>PostgreSQL layers →</b> Converted to a single 'data.gpkg' GeoPackage file</li>"
+            "<li><b>All project files →</b> Copied to output folder (including DCIM, photos, etc.)</li>"
+            "<li><b>Project file →</b> Updated to reference local GeoPackage instead of database</li>"
+            "<li><b>Folder structure →</b> Preserved exactly as in original project</li>"
+            "</ul>"
+            "<h4>Image Resizing (Optional):</h4>"
+            "<ul>"
+            "<li><b>Resize images →</b> If enabled, resizes all images in DCIM folders</li>"
+            "<li><b>Long side limit →</b> Images are resized only if their long side exceeds the specified pixel limit</li>"
+            "<li><b>Supported formats →</b> JPEG, PNG, TIFF, BMP, and other common image formats</li>"
+            "<li><b>Quality preserved →</b> JPEG quality is maintained at 95% during resizing</li>"
+            "</ul>"
+            "<h4>Result:</h4>"
+            "<p>A <b>'{project_name}_portable.qgs'</b> file that can be opened on any computer without needing PostgreSQL access.</p>"
+            "<h4>⚠️ Important notes:</h4>"
+            "<ul>"
+            "<li><b>Large files:</b> DCIM folders and media files will be copied (may take time)</li>"
+            "<li><b>Image resizing:</b> Processing many high-resolution images can take significant time</li>"
+            "<li><b>Database snapshots:</b> Data reflects the current state at export time</li>"
+            "<li><b>No live sync:</b> Archived data won't update from the original database</li>"
+            "</ul>"
+        )
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Help - Portable Project Archiver")
+        msg.setTextFormat(1)  # Rich text format
+        msg.setText(help_text)
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+
     def connect_signals(self):
         self.browse_folder_btn.clicked.connect(self._browse_output_folder)
         self.archive_btn.clicked.connect(self._on_archive_project)
@@ -122,6 +214,74 @@ class ArchiveProjectTab(BaseTab):
         if folder:
             self.output_folder_edit.setText(folder)
             self.emit_log(f"Output folder set to: {folder}")
+
+    def _resize_images_in_folder(self, folder_path, max_long_side):
+        """Resize all images in a folder if their long side exceeds max_long_side"""
+        supported_formats = ('.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.webp')
+        resized_count = 0
+        
+        try:
+            image_files = []
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    if file.lower().endswith(supported_formats):
+                        image_files.append(os.path.join(root, file))
+            
+            if not image_files:
+                return 0
+                
+            self.emit_log(f"Found {len(image_files)} images to potentially resize in {folder_path}")
+            
+            for i, image_path in enumerate(image_files):
+                try:
+                    # Update progress
+                    self.progress_label.setText(f"Resizing image {i+1}/{len(image_files)}: {os.path.basename(image_path)}")
+                    
+                    with Image.open(image_path) as img:
+                        # Apply EXIF orientation to ensure correct rotation
+                        img = ImageOps.exif_transpose(img)
+                        
+                        # Get original dimensions
+                        width, height = img.size
+                        long_side = max(width, height)
+                        
+                        # Only resize if long side exceeds the limit
+                        if long_side > max_long_side:
+                            # Calculate new dimensions maintaining aspect ratio
+                            if width > height:
+                                new_width = max_long_side
+                                new_height = int(height * max_long_side / width)
+                            else:
+                                new_height = max_long_side
+                                new_width = int(width * max_long_side / height)
+                            
+                            # Resize the image
+                            resized_img = img.resize((new_width, new_height), Image.LANCZOS)
+                            
+                            # Save with appropriate quality settings
+                            if image_path.lower().endswith(('.jpg', '.jpeg')):
+                                resized_img.save(image_path, 'JPEG', quality=95, optimize=True)
+                            else:
+                                resized_img.save(image_path, optimize=True)
+                            
+                            resized_count += 1
+                            self.emit_log(f"Resized {os.path.basename(image_path)} from {width}x{height} to {new_width}x{new_height}")
+                        else:
+                            # Even if not resizing, save with correct orientation if it's a JPEG
+                            if image_path.lower().endswith(('.jpg', '.jpeg')):
+                                img.save(image_path, 'JPEG', quality=95, optimize=True)
+                            else:
+                                img.save(image_path, optimize=True)
+                
+                except Exception as e:
+                    self.emit_log(f"Could not resize {os.path.basename(image_path)}: {str(e)}")
+                    continue
+            
+            return resized_count
+            
+        except Exception as e:
+            self.emit_log(f"Error during image resizing: {str(e)}")
+            return 0
 
     def _on_archive_project(self):
         output_folder = self.output_folder_edit.text().strip()
@@ -137,15 +297,31 @@ class ArchiveProjectTab(BaseTab):
             self.emit_log("No QGIS project is currently open.")
             return
 
-        # Show warning about copying all files including DCIM folder
-        warning_msg = (
-            "This will copy ALL files and folders from the project directory to the output folder.\n\n"
-            "This includes:\n"
-            "• DCIM folder (which might be quite large)\n"
-            "• All other project files and folders\n"
-            "• PostgreSQL layers will be converted to Geopackage\n\n"
+        # Build warning message
+        warning_parts = [
+            "This will copy ALL files and folders from the project directory to the output folder.",
+            "",
+            "This includes:",
+            "• DCIM folder (which might be quite large)",
+            "• All other project files and folders",
+            "• PostgreSQL layers will be converted to Geopackage"
+        ]
+        
+        # Add image resizing warning if enabled
+        if self.resize_images_checkbox.isChecked():
+            max_pixels = self.pixel_spinbox.value()
+            warning_parts.extend([
+                "",
+                f"• Images will be resized to {max_pixels}px on the long side",
+                "• This may take considerable time with many images"
+            ])
+        
+        warning_parts.extend([
+            "",
             "Do you want to continue?"
-        )
+        ])
+        
+        warning_msg = "\n".join(warning_parts)
         
         if not self.confirm_action("Copy All Project Files", warning_msg):
             return
@@ -178,6 +354,7 @@ class ArchiveProjectTab(BaseTab):
 
             # 1. Copy all files and folders from project directory to output folder (except the QGS file)
             original_qgs_name = project_file.name
+            dcim_folders = []  # Track DCIM folders for potential resizing
             
             # Only copy if source and target directories are different
             if str(project_dir) != str(Path(output_folder)):
@@ -200,22 +377,44 @@ class ArchiveProjectTab(BaseTab):
                             shutil.rmtree(target_path)
                         shutil.copytree(item, target_path)
                         self.emit_log(f"Copied folder: {item.name}")
+                        
+                        # Track DCIM folders for potential resizing
+                        if item.name.upper() == "DCIM":
+                            dcim_folders.append(target_path)
                     
                     current_step += 1
                     self.progress_bar.setValue(current_step)
             else:
                 self.emit_log("Source and target directories are the same, skipping file copy")
+                # Still need to find DCIM folders in the current directory
+                for item in project_dir.iterdir():
+                    if item.is_dir() and item.name.upper() == "DCIM":
+                        dcim_folders.append(item)
                 current_step += total_files  # Skip file copy steps
                 self.progress_bar.setValue(current_step)
 
-            # 2. Copy the current project file to output folder
+            # 2. Resize images in DCIM folders if requested
+            if self.resize_images_checkbox.isChecked() and dcim_folders:
+                max_pixels = self.pixel_spinbox.value()
+                self.emit_log(f"Resizing images in DCIM folders to {max_pixels}px long side...")
+                
+                total_resized = 0
+                for dcim_folder in dcim_folders:
+                    self.progress_label.setText(f"Processing images in {dcim_folder.name}...")
+                    resized_count = self._resize_images_in_folder(str(dcim_folder), max_pixels)
+                    total_resized += resized_count
+                    self.emit_log(f"Resized {resized_count} images in {dcim_folder}")
+                
+                self.emit_log(f"Total images resized: {total_resized}")
+
+            # 3. Copy the current project file to output folder
             self.progress_label.setText("Copying project file...")
             shutil.copy2(str(project_file), str(export_path))
             self.emit_log(f"Copied project file to: {export_path}")
             current_step += 1
             self.progress_bar.setValue(current_step)
 
-            # 3. Convert all layers to a single geopackage
+            # 4. Convert all layers to a single geopackage
             self.progress_label.setText("Converting layers to geopackage...")
             new_layer_sources = {}
             postgresql_layers = []
@@ -266,7 +465,7 @@ class ArchiveProjectTab(BaseTab):
                     current_step += 1
                     self.progress_bar.setValue(current_step)
 
-            # 4. Update the copied project file to point to geopackage
+            # 5. Update the copied project file to point to geopackage
             self.progress_label.setText("Updating project file...")
             if new_layer_sources:
                 self._update_project_sources(export_path, new_layer_sources, postgresql_layers)

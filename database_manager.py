@@ -160,6 +160,173 @@ class DatabaseManager(QObject):
             self.log_message(f"Error checking database existence: {str(e)}", Qgis.Critical)
             return False
     
+    def is_system_database(self, db_name):
+        """Check if database is a system database that should not be deleted."""
+        system_databases = ['postgres', 'template0', 'template1']
+        return db_name.lower() in system_databases
+    
+    def get_database_info(self, db_name):
+        """Get detailed information about a database."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    pg_database.datname,
+                    pg_database.datistemplate,
+                    pg_database.datallowconn,
+                    pg_database.datconnlimit,
+                    pg_database.datlastsysoid,
+                    pg_database.datfrozenxid,
+                    pg_database.datminmxid,
+                    pg_database.dattablespace,
+                    pg_database.datacl,
+                    pg_size_pretty(pg_database_size(pg_database.datname)) as size,
+                    pg_database_size(pg_database.datname) as size_bytes,
+                    pg_user.usename as owner
+                FROM pg_database
+                JOIN pg_user ON pg_database.datdba = pg_user.usesysid
+                WHERE pg_database.datname = %s;
+            """
+            
+            cursor.execute(query, (db_name,))
+            result = cursor.fetchone()
+            
+            if result:
+                db_info = {
+                    'name': result[0],
+                    'is_template': result[1],
+                    'allow_connections': result[2],
+                    'connection_limit': result[3],
+                    'size_pretty': result[9],
+                    'size_bytes': result[10],
+                    'owner': result[11]
+                }
+            else:
+                db_info = None
+            
+            cursor.close()
+            conn.close()
+            
+            return db_info
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting database info: {str(e)}", Qgis.Critical)
+            return None
+    
+    def delete_database(self, db_name, force_drop_connections=False):
+        """
+        Delete a database with strong safety checks and warnings.
+        
+        Args:
+            db_name (str): Name of the database to delete
+            force_drop_connections (bool): Whether to force drop active connections
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # ============ SAFETY CHECKS ============
+            
+            # Check if database exists
+            if not self.database_exists(db_name):
+                error_msg = f"Database '{db_name}' does not exist."
+                self.log_message(error_msg, Qgis.Warning)
+                self.operation_finished.emit(False, error_msg)
+                return False
+            
+            # Prevent deletion of system databases
+            if self.is_system_database(db_name):
+                error_msg = f"Cannot delete system database '{db_name}'. System databases (postgres, template0, template1) cannot be deleted."
+                self.log_message(error_msg, Qgis.Critical)
+                self.operation_finished.emit(False, error_msg)
+                return False
+            
+            # Prevent deletion of currently connected database
+            if self.connection_params.get('database') == db_name:
+                error_msg = f"Cannot delete database '{db_name}' because you are currently connected to it. Please connect to a different database first."
+                self.log_message(error_msg, Qgis.Critical)
+                self.operation_finished.emit(False, error_msg)
+                return False
+            
+            # Get database information for logging
+            db_info = self.get_database_info(db_name)
+            if db_info:
+                self.progress_updated.emit(f"Database info - Name: {db_info['name']}, Size: {db_info['size_pretty']}, Owner: {db_info['owner']}")
+            
+            # Check for active connections
+            connection_count = self.get_connection_count(db_name)
+            if connection_count > 0:
+                if force_drop_connections:
+                    self.progress_updated.emit(f"⚠️  WARNING: Found {connection_count} active connections to '{db_name}'. Forcing termination...")
+                    
+                    # Drop connections
+                    if not self.drop_database_connections(db_name):
+                        error_msg = f"Failed to drop active connections to database '{db_name}'. Cannot proceed with deletion."
+                        self.log_message(error_msg, Qgis.Critical)
+                        self.operation_finished.emit(False, error_msg)
+                        return False
+                    
+                    # Wait a moment for connections to be fully dropped
+                    import time
+                    time.sleep(1)
+                    
+                    # Verify connections are dropped
+                    remaining_connections = self.get_connection_count(db_name)
+                    if remaining_connections > 0:
+                        error_msg = f"Still {remaining_connections} active connections after termination. Cannot delete database."
+                        self.log_message(error_msg, Qgis.Critical)
+                        self.operation_finished.emit(False, error_msg)
+                        return False
+                else:
+                    error_msg = f"Cannot delete database '{db_name}' because it has {connection_count} active connections. Use 'force_drop_connections=True' to terminate connections first."
+                    self.log_message(error_msg, Qgis.Critical)
+                    self.operation_finished.emit(False, error_msg)
+                    return False
+            
+            # ============ DELETION PROCESS ============
+            
+            self.progress_updated.emit(f"🗑️  DELETING DATABASE '{db_name}' - THIS ACTION CANNOT BE UNDONE!")
+            
+            # Log the deletion attempt
+            self.log_message(f"CRITICAL: Attempting to delete database '{db_name}' by user '{self.connection_params['user']}'", Qgis.Critical)
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            
+            # Execute the deletion
+            cursor.execute(f'DROP DATABASE "{db_name}";')
+            
+            cursor.close()
+            conn.close()
+            
+            # Log successful deletion
+            success_msg = f"✅ Database '{db_name}' has been permanently deleted!"
+            self.log_message(f"SUCCESS: Database '{db_name}' deleted successfully by user '{self.connection_params['user']}'", Qgis.Info)
+            self.progress_updated.emit(success_msg)
+            self.operation_finished.emit(True, success_msg)
+            
+            return True
+            
+        except psycopg2.Error as e:
+            error_msg = f"❌ Error deleting database '{db_name}': {str(e)}"
+            self.log_message(error_msg, Qgis.Critical)
+            self.operation_finished.emit(False, error_msg)
+            return False
+        except Exception as e:
+            error_msg = f"❌ Unexpected error deleting database '{db_name}': {str(e)}"
+            self.log_message(error_msg, Qgis.Critical)
+            self.operation_finished.emit(False, error_msg)
+            return False
+    
     def find_qgis_projects(self, database_name):
         """Find QGIS projects tables in all schemas of the specified database."""
         try:
@@ -824,8 +991,8 @@ class DatabaseManager(QObject):
             self.progress_updated.emit(error_msg)
             return False
 
-    def create_template(self, source_db, template_name):
-        """Create a template from source database."""
+    def create_template(self, source_db, template_name, template_comment=None):
+        """Create a template from source database with optional comment."""
         try:
             self.progress_updated.emit(f"Creating template '{template_name}' from '{source_db}'...")
             
@@ -862,6 +1029,14 @@ class DatabaseManager(QObject):
             # Create template database
             cursor.execute(f'CREATE DATABASE "{template_name}" WITH TEMPLATE "{source_db}" IS_TEMPLATE = true;')
             
+            # Add comment if provided
+            if template_comment:
+                self.progress_updated.emit(f"Adding comment to template...")
+                # Escape single quotes in comment
+                escaped_comment = template_comment.replace("'", "''")
+                cursor.execute(f"COMMENT ON DATABASE \"{template_name}\" IS '{escaped_comment}';")
+                self.progress_updated.emit(f"Comment added: {template_comment}")
+            
             self.progress_updated.emit("Removing data from template...")
             
             # Connect to template database to remove data
@@ -897,6 +1072,9 @@ class DatabaseManager(QObject):
             template_conn.close()
             
             success_msg = f"Template '{template_name}' created successfully!"
+            if template_comment:
+                success_msg += f" Comment: {template_comment}"
+            
             self.progress_updated.emit(success_msg)
             self.operation_finished.emit(True, success_msg)
             return True
@@ -907,10 +1085,28 @@ class DatabaseManager(QObject):
             self.operation_finished.emit(False, error_msg)
             return False
 
-    def create_database_from_template(self, template_name, new_db_name):
-        """Create a new database from template."""
+    def create_database_from_template(self, template_name, new_db_name, db_comment=None):
+        """Create a new database from template with optional comment."""
         try:
             self.progress_updated.emit(f"Creating database '{new_db_name}' from template '{template_name}'...")
+            
+            # Check for active connections to the template database first
+            connection_count = self.get_connection_count(template_name)
+            if connection_count > 0:
+                self.progress_updated.emit(f"Found {connection_count} active connections to template '{template_name}'")
+                
+                # Drop connections
+                if not self.drop_database_connections(template_name):
+                    raise Exception("Failed to drop database connections to template")
+                
+                # Wait a moment for connections to be fully dropped
+                import time
+                time.sleep(1)
+                
+                # Verify connections are dropped
+                remaining_connections = self.get_connection_count(template_name)
+                if remaining_connections > 0:
+                    raise Exception(f"Still {remaining_connections} active connections to template after termination")
             
             conn_params = self.connection_params.copy()
             conn_params['database'] = 'postgres'
@@ -927,10 +1123,21 @@ class DatabaseManager(QObject):
             # Create database from template
             cursor.execute(f'CREATE DATABASE "{new_db_name}" WITH TEMPLATE "{template_name}";')
             
+            # Add comment if provided
+            if db_comment:
+                self.progress_updated.emit(f"Adding comment to database...")
+                # Escape single quotes in comment
+                escaped_comment = db_comment.replace("'", "''")
+                cursor.execute(f"COMMENT ON DATABASE \"{new_db_name}\" IS '{escaped_comment}';")
+                self.progress_updated.emit(f"Comment added: {db_comment}")
+            
             cursor.close()
             conn.close()
             
             success_msg = f"Database '{new_db_name}' created successfully from template '{template_name}'!"
+            if db_comment:
+                success_msg += f" Comment: {db_comment}"
+            
             self.progress_updated.emit(success_msg)
             self.operation_finished.emit(True, success_msg)
             return True
@@ -939,8 +1146,8 @@ class DatabaseManager(QObject):
             error_msg = f"Error creating database: {str(e)}"
             self.log_message(error_msg, Qgis.Critical)
             self.operation_finished.emit(False, error_msg)
-            return False
-    
+            return False    
+
     def delete_template(self, template_name):
         """Delete a template."""
         try:
@@ -972,3 +1179,92 @@ class DatabaseManager(QObject):
             self.log_message(error_msg, Qgis.Critical)
             self.operation_finished.emit(False, error_msg)
             return False
+
+    def get_templates_with_comments(self):
+        """Get list of template databases with their comments."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    d.datname,
+                    shobj_description(d.oid, 'pg_database') as comment
+                FROM pg_database d
+                WHERE d.datistemplate = true 
+                AND d.datname NOT IN ('template0', 'template1')
+                ORDER BY d.datname;
+            """
+            
+            cursor.execute(query)
+            templates = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            return templates
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting templates with comments: {str(e)}", Qgis.Critical)
+            return []
+
+    def get_database_comment(self, db_name):
+        """Get comment for a specific database."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT obj_description(d.oid, 'pg_database') as comment
+                FROM pg_database d
+                WHERE d.datname = %s;
+            """
+            
+            cursor.execute(query, (db_name,))
+            result = cursor.fetchone()
+            
+            cursor.close()
+            conn.close()
+            
+            return result[0] if result else None
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting database comment: {str(e)}", Qgis.Critical)
+            return None
+        
+    def get_databases_with_comments(self):
+        """Get list of non-template databases with their comments."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    d.datname,
+                    shobj_description(d.oid, 'pg_database') as comment
+                FROM pg_database d
+                WHERE d.datistemplate = false 
+                AND d.datname NOT IN ('postgres', 'template0', 'template1')
+                ORDER BY d.datname;
+            """
+            
+            cursor.execute(query)
+            databases = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            return databases
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting databases with comments: {str(e)}", Qgis.Critical)
+            return []

@@ -5,7 +5,8 @@ QGIS Projects tab for PostgreSQL Template Manager.
 from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import (QVBoxLayout, QHBoxLayout, QFormLayout, 
                                 QComboBox, QLineEdit, QSpinBox, QPushButton, 
-                                QGroupBox, QLabel, QCheckBox)
+                                QGroupBox, QLabel, QCheckBox, QMessageBox)
+from qgis.PyQt.QtGui import QFont
 from .base_tab import BaseTab
 
 
@@ -21,6 +22,34 @@ class QGISProjectsTab(BaseTab):
     def setup_ui(self):
         """Setup the QGIS projects tab UI."""
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title and help button section
+        title_layout = QHBoxLayout()
+        title_label = QLabel("QGIS Project Layer Updater")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        
+        self.help_btn = QPushButton("Help")
+        self.help_btn.setFixedWidth(80)
+        self.help_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #2196F3; "
+            "color: white; "
+            "font-weight: bold; "
+            "padding: 5px 10px; "
+            "border: none; "
+            "border-radius: 4px; "
+            "font-size: 12px; "
+            "} "
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        self.help_btn.clicked.connect(self._show_help_popup)
+        
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(self.help_btn)
+        layout.addLayout(title_layout)
         
         # Database selection section
         db_section = QGroupBox("Select Database")
@@ -62,14 +91,27 @@ class QGISProjectsTab(BaseTab):
         self.new_port_edit.setValue(5432)
         self.new_password_edit = QLineEdit()
         self.new_password_edit.setEchoMode(QLineEdit.Password)
-        self.new_schema_edit = QLineEdit()
+        
+        # Schema remapping fields
+        self.source_schema_edit = QLineEdit()
+        self.target_schema_edit = QLineEdit()
         
         params_layout.addRow("New DB Name:", self.new_dbname_edit)
         params_layout.addRow("New Host:", self.new_host_edit)
         params_layout.addRow("New User:", self.new_user_edit)
         params_layout.addRow("New Port:", self.new_port_edit)
         params_layout.addRow("New Password:", self.new_password_edit)
-        params_layout.addRow("New Schema:", self.new_schema_edit)
+        
+
+        params_layout.addRow("<b>Schema Remapping:</b>", None)
+
+        
+        params_layout.addRow("Source Schema (old):", self.source_schema_edit)
+        params_layout.addRow("Target Schema (new):", self.target_schema_edit)
+        
+        # Add tooltips for schema fields
+        self.source_schema_edit.setToolTip("Original schema name to replace (e.g., 'dogs')")
+        self.target_schema_edit.setToolTip("New schema name to use (e.g., 'cats')")
         
         # Create backup checkbox
         self.create_backup_checkbox = QCheckBox("Create local backup")
@@ -82,6 +124,32 @@ class QGISProjectsTab(BaseTab):
         params_layout.addWidget(self.fix_project_btn)
         
         layout.addWidget(params_section)
+    
+    def _show_help_popup(self):
+        """Show help information in a popup dialog."""
+        help_text = (
+            "<h3>QGIS Project Layer Updater</h3>"
+            "<p>This tool updates PostgreSQL connection parameters in QGIS project files.</p>"
+            "<h4>How it works:</h4>"
+            "<ul>"
+            "<li><b>Empty fields are ignored</b> and won't be changed</li>"
+            "<li><b>Schema remapping:</b> specify 'Source Schema' (old) and 'Target Schema' (new)</li>"
+            "<li><b>Both schema fields filled:</b> only layers using the source schema will be updated</li>"
+            "<li><b>Only 'Target Schema' filled:</b> ALL layers will use this schema</li>"
+            "<li><b>Other parameters</b> (host, user, etc.) apply to all matching layers</li>"
+            "</ul>"
+            "<h4>Examples:</h4>"
+            "<p><b>Schema remapping:</b> Source='dogs', Target='cats' → only 'dogs' schema layers become 'cats'</p>"
+            "<p><b>Global schema change:</b> Target='production' → all layers use 'production' schema</p>"
+        )
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Help - QGIS Project Layer Updater")
+        msg.setTextFormat(1)  # Rich text format
+        msg.setText(help_text)
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
     
     def connect_signals(self):
         """Connect signals."""
@@ -181,8 +249,26 @@ class QGISProjectsTab(BaseTab):
             new_params['port'] = str(self.new_port_edit.value())
         if self.new_password_edit.text().strip():
             new_params['password'] = self.new_password_edit.text().strip()
-        if self.new_schema_edit.text().strip():
-            new_params['schema'] = self.new_schema_edit.text().strip()
+        
+        # Handle schema remapping logic
+        source_schema = self.source_schema_edit.text().strip()
+        target_schema = self.target_schema_edit.text().strip()
+        
+        if source_schema and target_schema:
+            # Both schemas specified - remap from source to target
+            new_params['schema_remapping'] = {
+                'source': source_schema,
+                'target': target_schema
+            }
+            self.emit_log(f"Schema remapping: '{source_schema}' → '{target_schema}'")
+        elif target_schema:
+            # Only target schema specified - apply to all layers
+            new_params['schema'] = target_schema
+            self.emit_log(f"Setting schema to '{target_schema}' for all layers")
+        elif source_schema:
+            # Only source schema specified - this is not a valid configuration
+            self.show_warning("Target schema is required when source schema is specified.")
+            return {}
         
         return new_params
     
@@ -193,7 +279,8 @@ class QGISProjectsTab(BaseTab):
         self.new_user_edit.clear()
         self.new_port_edit.setValue(5432)
         self.new_password_edit.clear()
-        self.new_schema_edit.clear()
+        self.source_schema_edit.clear()
+        self.target_schema_edit.clear()
     
     def on_operation_finished(self, success, message):
         """Handle operation finished signal."""

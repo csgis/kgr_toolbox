@@ -3,8 +3,9 @@ Connection tab for PostgreSQL Template Manager.
 """
 
 from qgis.PyQt.QtCore import QSettings, pyqtSignal
-from qgis.PyQt.QtWidgets import (QFormLayout, QLineEdit, QSpinBox, QPushButton, 
-                                QLabel)
+from qgis.PyQt.QtWidgets import (QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, 
+                                QSpinBox, QPushButton, QLabel, QMessageBox)
+from qgis.PyQt.QtGui import QFont
 from .base_tab import BaseTab
 
 
@@ -20,7 +21,38 @@ class ConnectionTab(BaseTab):
     
     def setup_ui(self):
         """Setup the connection tab UI."""
-        layout = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title and help button section
+        title_layout = QHBoxLayout()
+        title_label = QLabel("PostgreSQL Connection")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        
+        self.help_btn = QPushButton("Help")
+        self.help_btn.setFixedWidth(80)
+        self.help_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #2196F3; "
+            "color: white; "
+            "font-weight: bold; "
+            "padding: 5px 10px; "
+            "border: none; "
+            "border-radius: 4px; "
+            "font-size: 12px; "
+            "} "
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        self.help_btn.clicked.connect(self._show_help_popup)
+        
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(self.help_btn)
+        layout.addLayout(title_layout)
+        
+        # Connection form
+        form_layout = QFormLayout()
         
         # Connection parameters
         self.host_edit = QLineEdit("localhost")
@@ -31,20 +63,67 @@ class ConnectionTab(BaseTab):
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
         
-        layout.addRow("Host:", self.host_edit)
-        layout.addRow("Port:", self.port_edit)
-        layout.addRow("Username:", self.username_edit)
-        layout.addRow("Password:", self.password_edit)
+        form_layout.addRow("Host:", self.host_edit)
+        form_layout.addRow("Port:", self.port_edit)
+        form_layout.addRow("Username:", self.username_edit)
+        form_layout.addRow("Password:", self.password_edit)
         
         # Test connection button
         self.test_conn_btn = QPushButton("Test Connection")
         self.test_conn_btn.clicked.connect(self.test_connection)
-        layout.addWidget(self.test_conn_btn)
+        form_layout.addWidget(self.test_conn_btn)
         
         # Connection status
         self.conn_status = QLabel("Not connected")
         self.conn_status.setStyleSheet("color: red;")
-        layout.addWidget(self.conn_status)
+        form_layout.addWidget(self.conn_status)
+        
+        layout.addLayout(form_layout)
+        layout.addStretch()
+
+    def _show_help_popup(self):
+        """Show help information in a popup dialog."""
+        help_text = (
+            "<h3>PostgreSQL Connection</h3>"
+            "<p>Configure connection settings to connect to your PostgreSQL database server.</p>"
+            "<h4>Connection Parameters:</h4>"
+            "<ul>"
+            "<li><b>Host:</b> Server address (localhost, IP address, or domain name)</li>"
+            "<li><b>Port:</b> PostgreSQL port number (default: 5432)</li>"
+            "<li><b>Username:</b> PostgreSQL user account with appropriate privileges</li>"
+            "<li><b>Password:</b> Password for the specified user account</li>"
+            "</ul>"
+            "<h4>Required Privileges:</h4>"
+            "<p>Your PostgreSQL user needs these permissions for full functionality:</p>"
+            "<ul>"
+            "<li><b>CREATEDB:</b> Create new databases and templates</li>"
+            "<li><b>Login rights:</b> Connect to the PostgreSQL server</li>"
+            "<li><b>Schema access:</b> Read project data from existing databases</li>"
+            "<li><b>Connection termination:</b> Drop active connections when needed</li>"
+            "</ul>"
+            "<h4>Connection Tips:</h4>"
+            "<ul>"
+            "<li><b>Local connections:</b> Use 'localhost' or '127.0.0.1' for same-machine databases</li>"
+            "<li><b>Remote connections:</b> Ensure PostgreSQL accepts remote connections</li>"
+            "<li><b>Firewall:</b> Check that port 5432 (or custom port) is accessible</li>"
+            "<li><b>SSL:</b> Connection uses standard PostgreSQL security settings</li>"
+            "</ul>"
+            "<h4>Troubleshooting:</h4>"
+            "<ul>"
+            "<li><b>Connection refused:</b> Check if PostgreSQL is running and port is correct</li>"
+            "<li><b>Authentication failed:</b> Verify username and password</li>"
+            "<li><b>Permission denied:</b> User may lack required database privileges</li>"
+            "<li><b>Timeout:</b> Network or firewall may be blocking the connection</li>"
+            "</ul>"
+        )
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Help - PostgreSQL Connection")
+        msg.setTextFormat(1)  # Rich text format
+        msg.setText(help_text)
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
     
     def connect_signals(self):
         """Connect signals."""

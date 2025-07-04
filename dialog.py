@@ -3,14 +3,14 @@ Main dialog for KGR Toolbox.
 """
 
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import (QDockWidget, QVBoxLayout, QWidget, QLabel, 
-                                QTabWidget, QGroupBox, QProgressBar, QTextEdit)
+from qgis.PyQt.QtWidgets import (QDockWidget, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
+                                QTabWidget, QGroupBox, QProgressBar, QTextEdit, QPushButton)
 from qgis.PyQt.QtGui import QFont
 
 from .tabs import ConnectionTab, TemplatesTab, DatabasesTab, QGISProjectsTab, ArchiveProjectTab
 
 
-class PostgreSQLTemplateManagerDialog(QDockWidget):
+class KgrToolBoxDialog(QDockWidget):
     """Main dialog for KGR Toolbox."""
     
     def __init__(self, db_manager, parent=None):
@@ -27,7 +27,6 @@ class PostgreSQLTemplateManagerDialog(QDockWidget):
     
     def setup_ui(self):
         """Setup the user interface."""
-        self.setWindowTitle("KGR Toolbox")
         self.setObjectName("KgrToolbox")
         
         # Main widget
@@ -76,12 +75,43 @@ class PostgreSQLTemplateManagerDialog(QDockWidget):
         self.progress_bar.setVisible(False)
         progress_layout.addWidget(self.progress_bar)
         
+        # Log area with clear button
+        log_header_layout = QHBoxLayout()
+        log_label = QLabel("Log Output:")
+        log_label.setStyleSheet("font-weight: bold;")
+        
+        self.clear_logs_btn = QPushButton("Clear Logs")
+        self.clear_logs_btn.setFixedWidth(100)
+        self.clear_logs_btn.setStyleSheet(
+            "QPushButton { "
+            "background-color: #f44336; "
+            "color: white; "
+            "font-weight: bold; "
+            "padding: 4px 8px; "
+            "border: none; "
+            "border-radius: 3px; "
+            "font-size: 11px; "
+            "} "
+            "QPushButton:hover { background-color: #d32f2f; }"
+        )
+        self.clear_logs_btn.clicked.connect(self.clear_logs)
+        
+        log_header_layout.addWidget(log_label)
+        log_header_layout.addStretch()
+        log_header_layout.addWidget(self.clear_logs_btn)
+        progress_layout.addLayout(log_header_layout)
+        
         self.log_text = QTextEdit()
         self.log_text.setMaximumHeight(100)
         self.log_text.setReadOnly(True)
+        self.log_text.setPlaceholderText("Operation logs will appear here...")
         progress_layout.addWidget(self.log_text)
         
         layout.addWidget(progress_group)
+    
+    def clear_logs(self):
+        """Clear the log text area."""
+        self.log_text.clear()
     
     def connect_tab_signals(self):
         """Connect signals from all tabs."""
