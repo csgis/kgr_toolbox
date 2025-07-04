@@ -1,6 +1,6 @@
 # KGR Toolbox
 
-A powerful QGIS plugin for managing PostgreSQL database templates and creating portable project archives.
+A QGIS plugin for managing PostgreSQL database templates and creating portable project archives.
 
 ## Features
 
@@ -97,28 +97,10 @@ The archive process copies ALL files from your project directory, including DCIM
 - **Backup & Recovery**: Maintain structural backups
 
 ### Portable Archives
-- **Field Data Collection**: Create QField-compatible project packages
 - **Project Sharing**: Share projects without database dependencies
 - **Offline Work**: Convert online projects for offline use
 - **Data Distribution**: Package projects for easy distribution
 
-## Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Setup
-```bash
-git clone https://github.com/csgis/postgresql-template-manager.git
-cd postgresql-template-manager
-# Install development dependencies
-pip install -r requirements-dev.txt
-```
 
 ## Troubleshooting
 
@@ -140,13 +122,13 @@ pip install -r requirements-dev.txt
 - Verify QGIS project is saved
 
 ### Getting Help
-- Check the [Issues](https://github.com/csgis/postgresql-template-manager/issues) page
+- Check the [Issues](https://github.com/csgis/kgr_toolbox/issues) page
 - Create a new issue with detailed description
 - Include QGIS version, PostgreSQL version, and error messages
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](https://opensource.org/license/mit) file for details.
 
 
 ## Changelog
@@ -159,5 +141,3 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 - Progress tracking and user feedback
 
 ---
-
-**Made with ❤️ for the QGIS community**
