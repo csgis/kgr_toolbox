@@ -103,42 +103,42 @@ WHERE pg_stat_activity.datname = 'source_database_name'
   AND pid <> pg_backend_pid();
 ```
 
-#### 2. Create Template Database
+#### 2. Create Template Database (Full Copy)
 ```sql
--- Create the new template database with special template settings
+-- Create the new template database as a complete copy of the source
 CREATE DATABASE template_database_name
-WITH TEMPLATE template0
-     ENCODING 'UTF8'
-     LC_COLLATE = 'en_US.UTF-8'
-     LC_CTYPE = 'en_US.UTF-8'
-     IS_TEMPLATE = true;
+WITH TEMPLATE source_database_name
+     OWNER template_owner;
 ```
 
-#### 3. Copy Schema Structure (Without Data)
+#### 3. Truncate All Data from Template
 ```sql
--- Connect to template database and copy schema structure
--- This includes tables, views, functions, triggers, etc.
--- But excludes all data from tables
+-- Connect to the template database and truncate all user tables
+-- This removes all data but preserves the complete schema structure
 
--- Copy table structures
-CREATE TABLE new_table (LIKE source_table INCLUDING ALL);
-
--- Copy views
-CREATE VIEW new_view AS SELECT * FROM source_view;
-
--- Copy functions and procedures
--- (Function definitions are copied from source database)
-
--- Copy triggers
--- (Trigger definitions are copied and recreated)
-
--- Copy constraints and indexes
--- (Included with INCLUDING ALL clause)
+-- Get all user tables and truncate them
+DO $
+DECLARE
+    table_name TEXT;
+BEGIN
+    FOR table_name IN 
+        SELECT schemaname||'.'||tablename 
+        FROM pg_tables 
+        WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
+    LOOP
+        EXECUTE 'TRUNCATE TABLE ' || table_name || ' CASCADE;';
+    END LOOP;
+END $;
 ```
 
-#### 4. Set Template Permissions
+#### 4. Set Template Properties
 ```sql
--- Prevent connections to template database during creation
+-- Mark database as a template
+UPDATE pg_database 
+SET datistemplate = true 
+WHERE datname = 'template_database_name';
+
+-- Prevent connections during final setup
 UPDATE pg_database 
 SET datallowconn = false 
 WHERE datname = 'template_database_name';
@@ -147,9 +147,6 @@ WHERE datname = 'template_database_name';
 UPDATE pg_database 
 SET datallowconn = true 
 WHERE datname = 'template_database_name';
-
--- Set appropriate ownership and permissions
-ALTER DATABASE template_database_name OWNER TO template_owner;
 ```
 
 #### 5. Template Deployment Commands
