@@ -89,7 +89,7 @@ class ArchiveProjectTab(BaseTab):
         self.pixel_label.setEnabled(False)
         self.pixel_spinbox = QSpinBox()
         self.pixel_spinbox.setRange(100, 10000)
-        self.pixel_spinbox.setValue(1920)
+        self.pixel_spinbox.setValue(300)
         self.pixel_spinbox.setSuffix(" px")
         self.pixel_spinbox.setEnabled(False)
         pixel_layout.addWidget(self.pixel_label)
