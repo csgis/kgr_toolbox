@@ -11,7 +11,7 @@ from PIL import Image, ImageOps
 from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton,
-    QLabel, QFileDialog, QProgressBar, QMessageBox, QCheckBox, QSpinBox
+    QLabel, QFileDialog, QProgressBar, QMessageBox, QCheckBox, QSpinBox, QTextEdit
 )
 from qgis.PyQt.QtGui import QFont
 from qgis.core import QgsProject, QgsVectorLayer, QgsVectorFileWriter
@@ -89,7 +89,7 @@ class ArchiveProjectTab(BaseTab):
         self.pixel_label.setEnabled(False)
         self.pixel_spinbox = QSpinBox()
         self.pixel_spinbox.setRange(100, 10000)
-        self.pixel_spinbox.setValue(300)
+        self.pixel_spinbox.setValue(1920)
         self.pixel_spinbox.setSuffix(" px")
         self.pixel_spinbox.setEnabled(False)
         pixel_layout.addWidget(self.pixel_label)
@@ -104,6 +104,29 @@ class ArchiveProjectTab(BaseTab):
         image_group.addWidget(self.resize_warning_label)
         
         layout.addLayout(image_group)
+
+        # Archive notes section
+        notes_group = QVBoxLayout()
+        notes_group.setSpacing(8)
+        
+        notes_label = QLabel("Archive Notes (optional):")
+        notes_label.setStyleSheet("font-weight: bold;")
+        notes_group.addWidget(notes_label)
+        
+        self.notes_textedit = QTextEdit()
+        self.notes_textedit.setPlaceholderText("Enter optional notes about this archive (e.g., purpose, context, modifications made)...")
+        self.notes_textedit.setMaximumHeight(80)
+        self.notes_textedit.setStyleSheet(
+            "QTextEdit { "
+            "border: 1px solid #ddd; "
+            "border-radius: 4px; "
+            "padding: 8px; "
+            "font-size: 12px; "
+            "}"
+        )
+        notes_group.addWidget(self.notes_textedit)
+        
+        layout.addLayout(notes_group)
 
         # Archive button
         self.archive_btn = QPushButton("Create Portable Archive")
@@ -186,6 +209,7 @@ class ArchiveProjectTab(BaseTab):
             "</ul>"
             "<h4>Result:</h4>"
             "<p>A <b>'{project_name}_portable.qgs'</b> file that can be opened on any computer without needing PostgreSQL access.</p>"
+            "<p>An <b>'archive_report.txt'</b> file is also created with details about the archiving process, including date, source project, and any user notes.</p>"
             "<h4>⚠️ Important notes:</h4>"
             "<ul>"
             "<li><b>Large files:</b> DCIM folders and media files will be copied (may take time)</li>"
@@ -214,6 +238,65 @@ class ArchiveProjectTab(BaseTab):
         if folder:
             self.output_folder_edit.setText(folder)
             self.emit_log(f"Output folder set to: {folder}")
+
+    def _create_archive_report(self, output_folder, project_file, resized_images_count=0):
+        """Create an archive report file with details about the archiving process"""
+        try:
+            from datetime import datetime
+            
+            report_path = Path(output_folder) / "archive_report.txt"
+            
+            # Get current date and time
+            current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Get project information
+            project_name = os.path.splitext(os.path.basename(project_file))[0]
+            project_path = str(project_file)
+            
+            # Get user notes
+            user_notes = self.notes_textedit.toPlainText().strip()
+            
+            # Create report content
+            report_lines = [
+                "QGIS PORTABLE PROJECT ARCHIVE REPORT",
+                "=" * 45,
+                "",
+                f"Archive Date: {current_datetime}",
+                f"Source Project: {project_name}",
+                f"Source Path: {project_path}",
+                f"Output Folder: {output_folder}",
+                "",
+                "PROCESSING DETAILS:",
+                "- PostgreSQL layers converted to GeoPackage format",
+                "- All project files and folders copied to output directory",
+                "- Project file updated to reference local data sources",
+            ]
+            
+            # Add image resizing info if applicable
+            if self.resize_images_checkbox.isChecked():
+                max_pixels = self.pixel_spinbox.value()
+                report_lines.extend([
+                    f"- Images resized to maximum {max_pixels}px on long side",
+                    f"- Total images processed: {resized_images_count}"
+                ])
+            
+            # Add user notes if provided
+            if user_notes:
+                report_lines.extend([
+                    "",
+                    "USER NOTES:",
+                    "-" * 12,
+                    user_notes
+                ])
+            
+            # Write report file
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(report_lines))
+            
+            self.emit_log(f"Archive report created: {report_path}")
+            
+        except Exception as e:
+            self.emit_log(f"Could not create archive report: {str(e)}")
 
     def _resize_images_in_folder(self, folder_path, max_long_side):
         """Resize all images in a folder if their long side exceeds max_long_side"""
@@ -345,7 +428,7 @@ class ArchiveProjectTab(BaseTab):
             project_dir = project_file.parent
             total_files = len([item for item in project_dir.iterdir() if item.name != project_file.name])
             
-            total_steps = total_files + total_layers + 2  # +2 for project copy and final update
+            total_steps = total_files + total_layers + 3  # +3 for project copy, final update, and report creation
             current_step = 0
             
             # Switch to determinate progress
@@ -394,11 +477,11 @@ class ArchiveProjectTab(BaseTab):
                 self.progress_bar.setValue(current_step)
 
             # 2. Resize images in DCIM folders if requested
+            total_resized = 0
             if self.resize_images_checkbox.isChecked() and dcim_folders:
                 max_pixels = self.pixel_spinbox.value()
                 self.emit_log(f"Resizing images in DCIM folders to {max_pixels}px long side...")
                 
-                total_resized = 0
                 for dcim_folder in dcim_folders:
                     self.progress_label.setText(f"Processing images in {dcim_folder.name}...")
                     resized_count = self._resize_images_in_folder(str(dcim_folder), max_pixels)
@@ -471,6 +554,16 @@ class ArchiveProjectTab(BaseTab):
                 self._update_project_sources(export_path, new_layer_sources, postgresql_layers)
                 self.emit_log("Updated project file to use geopackage sources")
             
+            current_step += 1
+            self.progress_bar.setValue(current_step)
+
+            # 6. Create archive report
+            self.progress_label.setText("Creating archive report...")
+            self._create_archive_report(
+                str(output_folder), 
+                str(project_file), 
+                total_resized
+            )
             current_step += 1
             self.progress_bar.setValue(current_step)
 
