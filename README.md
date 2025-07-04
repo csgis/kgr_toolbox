@@ -11,9 +11,7 @@ A QGIS plugin for managing PostgreSQL database templates and creating portable p
 
 ### 📦 Portable Project Archives
 - **PostgreSQL to Geopackage**: Convert all PostgreSQL layers to a single portable geopackage
-- **Complete Project Export**: Copy all project files including DCIM folders and media
-- **QField Compatible**: Create archives ready for mobile data collection with QField
-- **Progress Tracking**: Real-time progress feedback during export process
+- **Complete Project Export**: Copy all project files including DCIM folders and media and updates source references
 
 ## Installation
 
@@ -47,10 +45,10 @@ A QGIS plugin for managing PostgreSQL database templates and creating portable p
 
 #### Deploying from Template
 1. Ensure your connection is configured
-2. Go to the **Deploy Template** tab
+2. Go to the **Create Template** tab
 3. Select the template database
 4. Enter new database name
-5. Click **Deploy Database**
+5. Click **Create Database**
 
 ### Creating Portable Archives
 
@@ -76,70 +74,55 @@ The archive process copies ALL files from your project directory, including DCIM
 - PostgreSQL database with appropriate permissions
 - Python 3.6+ (included with QGIS)
 
-## Supported Formats
-
-### Input
-- PostgreSQL databases
-- QGIS projects (.qgs files)
-- All standard QGIS vector layers
-
-### Output
-- PostgreSQL templates
-- Geopackage (.gpkg)
-- Portable QGIS projects
-
 ## Technical Details
 
-### SQL Commands for Template Creation
+### Manual Template Creation
 
-When creating a clean template from a database, the plugin executes the following SQL commands in sequence:
+If you prefer to create templates manually, you can execute these SQL commands directly in any PostgreSQL client (DBeaver, pgAdmin, etc.):
 
-#### 1. Disconnect Active Users
 ```sql
--- Terminate all active connections to the source database
+-- 1. Connect to postgres database and terminate active connections to source database
 SELECT pg_terminate_backend(pid) 
 FROM pg_stat_activity 
 WHERE datname = 'source_database_name' 
   AND pid != pg_backend_pid();
-```
 
-#### 2. Create Template Database (Full Copy with Template Flag)
-```sql
--- Drop existing template if it exists
-DROP DATABASE "template_database_name";
-
--- Create the new template database as a complete copy of the source
--- and mark it as a template in the same command
+-- 2. Create template database
 CREATE DATABASE "template_database_name" 
 WITH TEMPLATE "source_database_name" 
      IS_TEMPLATE = true;
+
+-- 3. Connect to the template database
+
+-- 4. Truncate all user tables to remove data while preserving structure
+DO $$
+DECLARE
+    table_record RECORD;
+BEGIN
+    FOR table_record IN 
+        SELECT schemaname, tablename 
+        FROM pg_tables 
+        WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+        ORDER BY schemaname, tablename
+    LOOP
+        EXECUTE format('TRUNCATE TABLE %I.%I CASCADE;', 
+                      table_record.schemaname, 
+                      table_record.tablename);
+        RAISE NOTICE 'Cleared data from %.%', 
+                     table_record.schemaname, 
+                     table_record.tablename;
+    END LOOP;
+END $$;
 ```
 
-#### 3. Truncate All Data from Template
+**Template Deployment:**
 ```sql
--- Connect to the template database and get all user tables
-SELECT schemaname, tablename 
-FROM pg_tables 
-WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-ORDER BY schemaname, tablename;
-
--- Truncate each table individually with CASCADE
-TRUNCATE TABLE "schema_name"."table_name" CASCADE;
-```
-
-#### 4. Template Deployment Commands
-When deploying a new database from a template:
-```sql
--- Drop existing database if it exists
-DROP DATABASE "new_database_name";
-
 -- Create new database from template
 CREATE DATABASE "new_database_name" 
 WITH TEMPLATE "template_database_name";
 ```
 
-#### 5. Template Deletion Commands
-When deleting a template:
+**Template Deletion:**
 ```sql
 -- Deactivate template status first
 UPDATE pg_database 
@@ -149,52 +132,6 @@ WHERE datname = 'template_database_name';
 -- Drop the template database
 DROP DATABASE "template_database_name";
 ```
-
-### Manual Template Creation
-
-If you prefer to create templates manually, you can use these commands directly in PostgreSQL:
-
-```bash
-# Connect to PostgreSQL
-psql -h hostname -U username -d postgres
-
-# 1. Terminate active connections to source database
-SELECT pg_terminate_backend(pid) 
-FROM pg_stat_activity 
-WHERE datname = 'source_database_name' 
-  AND pid != pg_backend_pid();
-
-# 2. Create template database
-CREATE DATABASE "template_database_name" 
-WITH TEMPLATE "source_database_name" 
-     IS_TEMPLATE = true;
-
-# 3. Connect to template database
-\c template_database_name
-
-# 4. Get list of all user tables
-SELECT schemaname, tablename 
-FROM pg_tables 
-WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-ORDER BY schemaname, tablename;
-
-# 5. Truncate each table (repeat for each table found)
-TRUNCATE TABLE "schema_name"."table_name" CASCADE;
-```
-
-## Use Cases
-
-### Template Management
-- **Development Workflows**: Create clean database templates for new projects
-- **Testing**: Deploy consistent test databases
-- **Team Collaboration**: Share database structures without sensitive data
-- **Backup & Recovery**: Maintain structural backups
-
-### Portable Archives
-- **Project Sharing**: Share projects without database dependencies
-- **Offline Work**: Convert online projects for offline use
-- **Data Distribution**: Package projects for easy distribution
-
 
 ## Troubleshooting
 
@@ -223,15 +160,3 @@ TRUNCATE TABLE "schema_name"."table_name" CASCADE;
 ## License
 
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](https://opensource.org/license/mit) file for details.
-
-
-## Changelog
-
-### v1.0.0
-- Initial release
-- PostgreSQL template management
-- Portable project archive creation
-- QField compatibility
-- Progress tracking and user feedback
-
----
