@@ -1,8 +1,8 @@
 def classFactory(iface):
-    """Load PostgreSQLTemplateManager class from file postgresql_template_manager.
+    """Load KgrToolbox class from file kgr_toolbox.
     
     Args:
         iface: A QGIS interface instance.
     """
-    from .postgresql_template_manager import PostgreSQLTemplateManager
-    return PostgreSQLTemplateManager(iface)
+    from .kgr_toolbox import KgrToolbox
+    return KgrToolbox(iface)

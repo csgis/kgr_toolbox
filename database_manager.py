@@ -24,7 +24,7 @@ class DatabaseManager(QObject):
     
     def log_message(self, message, level=Qgis.Info):
         """Log message to QGIS message log."""
-        QgsMessageLog.logMessage(message, 'PostgreSQL Template Manager', level)
+        QgsMessageLog.logMessage(message, 'KGR Toolbox', level)
     
     def set_connection_params(self, host, port, database, username, password):
         """Set connection parameters."""
@@ -705,11 +705,147 @@ class DatabaseManager(QObject):
         except psycopg2.Error as e:
             self.log_message(f"Error uploading project content: {str(e)}", Qgis.Critical)
             return False
-    
+
+
+    def get_active_connections(self, database_name):
+        """Get list of active connections to a specific database."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            # Query to get active connections (excluding our own connection)
+            query = """
+                SELECT 
+                    pid,
+                    usename,
+                    client_addr,
+                    client_hostname,
+                    client_port,
+                    backend_start,
+                    state,
+                    query
+                FROM pg_stat_activity 
+                WHERE datname = %s 
+                AND pid != pg_backend_pid()
+                AND state != 'idle'
+                ORDER BY backend_start;
+            """
+            
+            cursor.execute(query, (database_name,))
+            connections = cursor.fetchall()
+            
+            cursor.close()
+            conn.close()
+            
+            return connections
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting active connections: {str(e)}", Qgis.Critical)
+            return []
+
+    def get_connection_count(self, database_name):
+        """Get count of active connections to a specific database."""
+        try:
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            # Count connections excluding our own
+            query = """
+                SELECT COUNT(*) 
+                FROM pg_stat_activity 
+                WHERE datname = %s 
+                AND pid != pg_backend_pid();
+            """
+            
+            cursor.execute(query, (database_name,))
+            count = cursor.fetchone()[0]
+            
+            cursor.close()
+            conn.close()
+            
+            return count
+            
+        except psycopg2.Error as e:
+            self.log_message(f"Error getting connection count: {str(e)}", Qgis.Critical)
+            return 0
+
+    def drop_database_connections(self, database_name):
+        """Drop all active connections to a specific database."""
+        try:
+            self.progress_updated.emit(f"Dropping active connections to '{database_name}'...")
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            
+            # Get connection details before dropping
+            connections = self.get_active_connections(database_name)
+            
+            if connections:
+                self.progress_updated.emit(f"Found {len(connections)} active connections to drop")
+                
+                # Log connection details
+                for conn_info in connections:
+                    pid, username, client_addr, client_hostname, client_port, backend_start, state, query = conn_info
+                    self.log_message(f"Dropping connection: PID={pid}, User={username}, Client={client_addr or client_hostname}", Qgis.Info)
+            
+            # Drop all connections to the database (excluding our own)
+            terminate_query = """
+                SELECT pg_terminate_backend(pid) 
+                FROM pg_stat_activity 
+                WHERE datname = %s 
+                AND pid != pg_backend_pid();
+            """
+            
+            cursor.execute(terminate_query, (database_name,))
+            terminated_connections = cursor.fetchall()
+            
+            # Count successful terminations
+            successful_terminations = sum(1 for result in terminated_connections if result[0])
+            
+            cursor.close()
+            conn.close()
+            
+            self.progress_updated.emit(f"Successfully dropped {successful_terminations} connections")
+            return True
+            
+        except psycopg2.Error as e:
+            error_msg = f"Error dropping database connections: {str(e)}"
+            self.log_message(error_msg, Qgis.Critical)
+            self.progress_updated.emit(error_msg)
+            return False
+
     def create_template(self, source_db, template_name):
         """Create a template from source database."""
         try:
             self.progress_updated.emit(f"Creating template '{template_name}' from '{source_db}'...")
+            
+            # Check for active connections first
+            connection_count = self.get_connection_count(source_db)
+            if connection_count > 0:
+                self.progress_updated.emit(f"Found {connection_count} active connections to '{source_db}'")
+                
+                # Drop connections
+                if not self.drop_database_connections(source_db):
+                    raise Exception("Failed to drop database connections")
+                
+                # Wait a moment for connections to be fully dropped
+                import time
+                time.sleep(1)
+                
+                # Verify connections are dropped
+                remaining_connections = self.get_connection_count(source_db)
+                if remaining_connections > 0:
+                    raise Exception(f"Still {remaining_connections} active connections after termination")
             
             conn_params = self.connection_params.copy()
             conn_params['database'] = 'postgres'
@@ -770,7 +906,7 @@ class DatabaseManager(QObject):
             self.log_message(error_msg, Qgis.Critical)
             self.operation_finished.emit(False, error_msg)
             return False
-    
+
     def create_database_from_template(self, template_name, new_db_name):
         """Create a new database from template."""
         try:

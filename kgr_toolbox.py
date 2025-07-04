@@ -7,7 +7,7 @@ from .database_manager import DatabaseManager
 from .dialog import PostgreSQLTemplateManagerDialog
 
 
-class PostgreSQLTemplateManager:
+class KgrToolbox:
     """Main plugin class."""
 
     def __init__(self, iface):

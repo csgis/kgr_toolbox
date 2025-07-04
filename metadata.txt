@@ -1,15 +1,15 @@
 [general]
-name=PostgreSQL Template Manager
+name=KGR Toolbox
 qgisMinimumVersion=3.0
-description=Manage PostgreSQL database templates - create templates from existing databases without data and create new databases from templates
+description=Manage PostgreSQL database templates and create portable project archives - create templates from existing databases without data, create new databases from templates, and export projects with PostgreSQL layers as portable geopackage archives
 version=1.0.0
 author=Toni Schönbuchner | CSGIS
 email=toni.schoenbuchner@csgis.de
-about=A QGIS plugin for managing PostgreSQL database templates. Create templates from existing databases without data and create new databases from existing templates.
-tracker=https://github.com/csgis/postgresql-template-manager/issues
-repository=https://github.com/csgis/postgresql-template-manager
-tags=postgresql,database,template,management
-homepage=https://github.com/csgis/postgresql-template-manager
+about=A QGIS plugin for managing PostgreSQL database templates and creating portable project archives. Create templates from existing databases without data, create new databases from existing templates, and export QGIS projects with PostgreSQL layers as portable archives where all layers are converted to a single geopackage format. Perfect for sharing projects or creating QField-compatible archives.
+tracker=https://github.com/csgis/kgr_toolbox/issues
+repository=https://github.com/csgis/kgr_toolbox
+tags=postgresql,database,template,management,archive,portable,geopackage,qfield
+homepage=https://github.com/csgis/kgr_toolbox
 category=Database
 icon=icon.png
 experimental=False
