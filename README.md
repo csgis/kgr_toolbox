@@ -1,95 +1,3 @@
-# KGR Toolbox
-
-A QGIS plugin for managing PostgreSQL database templates and creating portable project archives.
-
-## Features
-
-### 🗄️ PostgreSQL Template Management
-- **Create Templates**: Generate database templates from existing PostgreSQL databases without data
-- **Deploy Templates**: Create new databases from existing templates
-- **Schema Preservation**: Maintain all database structure, constraints, and relationships
-
-### 📦 Portable Project Archives
-- **PostgreSQL to Geopackage**: Convert all PostgreSQL layers to a single portable geopackage
-- **Complete Project Export**: Copy all project files including DCIM folders and media
-- **QField Compatible**: Create archives ready for mobile data collection with QField
-- **Progress Tracking**: Real-time progress feedback during export process
-
-## Installation
-
-### From QGIS Plugin Repository
-1. Open QGIS
-2. Go to `Plugins` → `Manage and Install Plugins`
-3. Search for "KGR Toolbox"
-4. Click `Install Plugin`
-
-### Manual Installation
-1. Download the latest release from [GitHub Releases](https://github.com/csgis/postgresql-template-manager/releases)
-2. Extract the zip file to your QGIS plugins directory:
-   - **Windows**: `C:\Users\[username]\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\`
-   - **macOS**: `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
-   - **Linux**: `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
-3. Restart QGIS
-4. Enable the plugin in `Plugins` → `Manage and Install Plugins` → `Installed`
-
-## Usage
-
-### PostgreSQL Template Management
-
-#### Creating a Template
-1. Open the KGR Toolbox plugin
-2. Go to the **Database Connection** tab
-3. Enter your PostgreSQL connection details
-4. Click **Test Connection**
-5. Switch to the **Create Template** tab
-6. Select source database and enter template name
-7. Click **Create Template**
-
-#### Deploying from Template
-1. Ensure your connection is configured
-2. Go to the **Deploy Template** tab
-3. Select the template database
-4. Enter new database name
-5. Click **Deploy Database**
-
-### Creating Portable Archives
-
-#### Export Project Archive
-1. Open your QGIS project with PostgreSQL layers
-2. Open the KGR Toolbox plugin
-3. Go to the **Archive Project** tab
-4. Select output folder
-5. Click **Create Portable Archive**
-
-The plugin will:
-- Copy all project files and folders (including DCIM)
-- Convert all PostgreSQL layers to a single geopackage
-- Update the project file to use geopackage sources
-- Create a portable `_portable.qgs` file
-
-#### Warning
-The archive process copies ALL files from your project directory, including DCIM folders which may be quite large. Choose your output location carefully.
-
-## Requirements
-
-- QGIS 3.0 or higher
-- PostgreSQL database with appropriate permissions
-- Python 3.6+ (included with QGIS)
-
-## Supported Formats
-
-### Input
-- PostgreSQL databases
-- QGIS projects (.qgs files)
-- All standard QGIS vector layers
-
-### Output
-- PostgreSQL templates
-- Geopackage (.gpkg)
-- Portable QGIS projects
-
-## Technical Details
-
 ### SQL Commands for Template Creation
 
 When creating a clean template from a database, the plugin executes the following SQL commands in sequence:
@@ -97,68 +5,57 @@ When creating a clean template from a database, the plugin executes the followin
 #### 1. Disconnect Active Users
 ```sql
 -- Terminate all active connections to the source database
-SELECT pg_terminate_backend(pg_stat_activity.pid)
-FROM pg_stat_activity
-WHERE pg_stat_activity.datname = 'source_database_name' 
-  AND pid <> pg_backend_pid();
+SELECT pg_terminate_backend(pid) 
+FROM pg_stat_activity 
+WHERE datname = 'source_database_name' 
+  AND pid != pg_backend_pid();
 ```
 
-#### 2. Create Template Database (Full Copy)
+#### 2. Create Template Database (Full Copy with Template Flag)
 ```sql
+-- Drop existing template if it exists
+DROP DATABASE "template_database_name";
+
 -- Create the new template database as a complete copy of the source
-CREATE DATABASE template_database_name
-WITH TEMPLATE source_database_name
-     OWNER template_owner;
+-- and mark it as a template in the same command
+CREATE DATABASE "template_database_name" 
+WITH TEMPLATE "source_database_name" 
+     IS_TEMPLATE = true;
 ```
 
 #### 3. Truncate All Data from Template
 ```sql
--- Connect to the template database and truncate all user tables
--- This removes all data but preserves the complete schema structure
+-- Connect to the template database and get all user tables
+SELECT schemaname, tablename 
+FROM pg_tables 
+WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+ORDER BY schemaname, tablename;
 
--- Get all user tables and truncate them
-DO $
-DECLARE
-    table_name TEXT;
-BEGIN
-    FOR table_name IN 
-        SELECT schemaname||'.'||tablename 
-        FROM pg_tables 
-        WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
-    LOOP
-        EXECUTE 'TRUNCATE TABLE ' || table_name || ' CASCADE;';
-    END LOOP;
-END $;
+-- Truncate each table individually with CASCADE
+TRUNCATE TABLE "schema_name"."table_name" CASCADE;
 ```
 
-#### 4. Set Template Properties
-```sql
--- Mark database as a template
-UPDATE pg_database 
-SET datistemplate = true 
-WHERE datname = 'template_database_name';
-
--- Prevent connections during final setup
-UPDATE pg_database 
-SET datallowconn = false 
-WHERE datname = 'template_database_name';
-
--- Re-enable connections after setup is complete
-UPDATE pg_database 
-SET datallowconn = true 
-WHERE datname = 'template_database_name';
-```
-
-#### 5. Template Deployment Commands
+#### 4. Template Deployment Commands
 When deploying a new database from a template:
 ```sql
--- Create new database from template
-CREATE DATABASE new_database_name
-WITH TEMPLATE template_database_name
-     OWNER database_owner;
+-- Drop existing database if it exists
+DROP DATABASE "new_database_name";
 
--- Grant appropriate permissions
-GRANT ALL PRIVILEGES ON DATABASE new_database_name TO database_user;
+-- Create new database from template
+CREATE DATABASE "new_database_name" 
+WITH TEMPLATE "template_database_name";
+```
+
+#### 5. Template Deletion Commands
+When deleting a template:
+```sql
+-- Deactivate template status first
+UPDATE pg_database 
+SET datistemplate = false 
+WHERE datname = 'template_database_name';
+
+-- Drop the template database
+DROP DATABASE "template_database_name";
 ```
 
 ### Manual Template Creation
@@ -169,59 +66,26 @@ If you prefer to create templates manually, you can use these commands directly 
 # Connect to PostgreSQL
 psql -h hostname -U username -d postgres
 
-# Execute the SQL commands above in sequence
+# 1. Terminate active connections to source database
+SELECT pg_terminate_backend(pid) 
+FROM pg_stat_activity 
+WHERE datname = 'source_database_name' 
+  AND pid != pg_backend_pid();
+
+# 2. Create template database
+CREATE DATABASE "template_database_name" 
+WITH TEMPLATE "source_database_name" 
+     IS_TEMPLATE = true;
+
+# 3. Connect to template database
+\c template_database_name
+
+# 4. Get list of all user tables
+SELECT schemaname, tablename 
+FROM pg_tables 
+WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+ORDER BY schemaname, tablename;
+
+# 5. Truncate each table (repeat for each table found)
+TRUNCATE TABLE "schema_name"."table_name" CASCADE;
 ```
-
-## Use Cases
-
-### Template Management
-- **Development Workflows**: Create clean database templates for new projects
-- **Testing**: Deploy consistent test databases
-- **Team Collaboration**: Share database structures without sensitive data
-- **Backup & Recovery**: Maintain structural backups
-
-### Portable Archives
-- **Project Sharing**: Share projects without database dependencies
-- **Offline Work**: Convert online projects for offline use
-- **Data Distribution**: Package projects for easy distribution
-
-
-## Troubleshooting
-
-### Common Issues
-
-**Connection Failed**
-- Verify PostgreSQL server is running
-- Check host, port, and credentials
-- Ensure user has appropriate permissions
-
-**Template Creation Failed**
-- Ensure user has CREATEDB privileges
-- Check database name doesn't already exist
-- Verify sufficient disk space
-
-**Archive Export Failed**
-- Check write permissions in output folder
-- Ensure sufficient disk space
-- Verify QGIS project is saved
-
-### Getting Help
-- Check the [Issues](https://github.com/csgis/kgr_toolbox/issues) page
-- Create a new issue with detailed description
-- Include QGIS version, PostgreSQL version, and error messages
-
-## License
-
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](https://opensource.org/license/mit) file for details.
-
-
-## Changelog
-
-### v1.0.0
-- Initial release
-- PostgreSQL template management
-- Portable project archive creation
-- QField compatibility
-- Progress tracking and user feedback
-
----
