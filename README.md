@@ -88,6 +88,93 @@ The archive process copies ALL files from your project directory, including DCIM
 - Geopackage (.gpkg)
 - Portable QGIS projects
 
+## Technical Details
+
+### SQL Commands for Template Creation
+
+When creating a clean template from a database, the plugin executes the following SQL commands in sequence:
+
+#### 1. Disconnect Active Users
+```sql
+-- Terminate all active connections to the source database
+SELECT pg_terminate_backend(pg_stat_activity.pid)
+FROM pg_stat_activity
+WHERE pg_stat_activity.datname = 'source_database_name' 
+  AND pid <> pg_backend_pid();
+```
+
+#### 2. Create Template Database
+```sql
+-- Create the new template database with special template settings
+CREATE DATABASE template_database_name
+WITH TEMPLATE template0
+     ENCODING 'UTF8'
+     LC_COLLATE = 'en_US.UTF-8'
+     LC_CTYPE = 'en_US.UTF-8'
+     IS_TEMPLATE = true;
+```
+
+#### 3. Copy Schema Structure (Without Data)
+```sql
+-- Connect to template database and copy schema structure
+-- This includes tables, views, functions, triggers, etc.
+-- But excludes all data from tables
+
+-- Copy table structures
+CREATE TABLE new_table (LIKE source_table INCLUDING ALL);
+
+-- Copy views
+CREATE VIEW new_view AS SELECT * FROM source_view;
+
+-- Copy functions and procedures
+-- (Function definitions are copied from source database)
+
+-- Copy triggers
+-- (Trigger definitions are copied and recreated)
+
+-- Copy constraints and indexes
+-- (Included with INCLUDING ALL clause)
+```
+
+#### 4. Set Template Permissions
+```sql
+-- Prevent connections to template database during creation
+UPDATE pg_database 
+SET datallowconn = false 
+WHERE datname = 'template_database_name';
+
+-- Re-enable connections after setup is complete
+UPDATE pg_database 
+SET datallowconn = true 
+WHERE datname = 'template_database_name';
+
+-- Set appropriate ownership and permissions
+ALTER DATABASE template_database_name OWNER TO template_owner;
+```
+
+#### 5. Template Deployment Commands
+When deploying a new database from a template:
+```sql
+-- Create new database from template
+CREATE DATABASE new_database_name
+WITH TEMPLATE template_database_name
+     OWNER database_owner;
+
+-- Grant appropriate permissions
+GRANT ALL PRIVILEGES ON DATABASE new_database_name TO database_user;
+```
+
+### Manual Template Creation
+
+If you prefer to create templates manually, you can use these commands directly in PostgreSQL:
+
+```bash
+# Connect to PostgreSQL
+psql -h hostname -U username -d postgres
+
+# Execute the SQL commands above in sequence
+```
+
 ## Use Cases
 
 ### Template Management
