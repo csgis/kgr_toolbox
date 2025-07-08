@@ -129,8 +129,19 @@ UPDATE pg_database
 SET datistemplate = false 
 WHERE datname = 'template_database_name';
 
+```sql
+-- Deactivate connections
+SELECT pg_terminate_backend(pid) 
+FROM pg_stat_activity 
+WHERE datname = 'source_database_name' or datname = 'new_database_name'
+  AND pid != pg_backend_pid();
+```
+
 -- Drop the template database
 DROP DATABASE "template_database_name";
+
+-- Drop the new database
+DROP DATABASE "new_database_name";
 ```
 
 ## Troubleshooting
