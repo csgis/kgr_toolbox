@@ -63,20 +63,30 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT datname FROM pg_database 
-                WHERE datistemplate = false 
-                AND datname NOT IN ('postgres', 'template0', 'template1')
-                ORDER BY datname;
-            """
-            
-            cursor.execute(query)
-            databases = [row[0] for row in cursor.fetchall()]
-            
-            cursor.close()
-            conn.close()
-            
-            return databases
+            try:
+                query = """
+                    SELECT datname FROM pg_database 
+                    WHERE datistemplate = false 
+                    AND datname NOT IN ('postgres', 'template0', 'template1')
+                    ORDER BY datname;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                databases = []
+                for row in results:
+                    if row and len(row) > 0 and row[0] is not None:
+                        databases.append(str(row[0]))
+                
+                return databases
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting databases: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting databases: {str(e)}", Qgis.Critical)
@@ -91,20 +101,30 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT datname FROM pg_database 
-                WHERE datistemplate = true 
-                AND datname NOT IN ('template0', 'template1')
-                ORDER BY datname;
-            """
-            
-            cursor.execute(query)
-            templates = [row[0] for row in cursor.fetchall()]
-            
-            cursor.close()
-            conn.close()
-            
-            return templates
+            try:
+                query = """
+                    SELECT datname FROM pg_database 
+                    WHERE datistemplate = true 
+                    AND datname NOT IN ('template0', 'template1')
+                    ORDER BY datname;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                templates = []
+                for row in results:
+                    if row and len(row) > 0 and row[0] is not None:
+                        templates.append(str(row[0]))
+                
+                return templates
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting templates: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting templates: {str(e)}", Qgis.Critical)
@@ -119,21 +139,28 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            # Check if user is superuser
-            cursor.execute(f"SELECT usesuper FROM pg_user WHERE usename = '{self.connection_params['user']}';")
-            is_superuser = cursor.fetchone()[0] if cursor.rowcount > 0 else False
-            
-            # Check CREATEDB privilege
-            cursor.execute(f"SELECT usecreatedb FROM pg_user WHERE usename = '{self.connection_params['user']}';")
-            can_create_db = cursor.fetchone()[0] if cursor.rowcount > 0 else False
-            
-            cursor.close()
-            conn.close()
-            
-            return {
-                'is_superuser': is_superuser,
-                'can_create_db': can_create_db
-            }
+            try:
+                # Check if user is superuser
+                cursor.execute("SELECT usesuper FROM pg_user WHERE usename = %s;", (self.connection_params['user'],))
+                result = cursor.fetchone()
+                is_superuser = result[0] if result and len(result) > 0 else False
+                
+                # Check CREATEDB privilege
+                cursor.execute("SELECT usecreatedb FROM pg_user WHERE usename = %s;", (self.connection_params['user'],))
+                result = cursor.fetchone()
+                can_create_db = result[0] if result and len(result) > 0 else False
+                
+                return {
+                    'is_superuser': is_superuser,
+                    'can_create_db': can_create_db
+                }
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error checking privileges: {str(db_error)}", Qgis.Critical)
+                return {'is_superuser': False, 'can_create_db': False}
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error checking privileges: {str(e)}", Qgis.Critical)
@@ -148,13 +175,19 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s;", (db_name,))
-            exists = cursor.rowcount > 0
-            
-            cursor.close()
-            conn.close()
-            
-            return exists
+            try:
+                cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s;", (db_name,))
+                result = cursor.fetchone()
+                exists = result is not None
+                
+                return exists
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error checking database existence: {str(db_error)}", Qgis.Critical)
+                return False
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error checking database existence: {str(e)}", Qgis.Critical)
@@ -174,45 +207,50 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT 
-                    pg_database.datname,
-                    pg_database.datistemplate,
-                    pg_database.datallowconn,
-                    pg_database.datconnlimit,
-                    pg_database.datlastsysoid,
-                    pg_database.datfrozenxid,
-                    pg_database.datminmxid,
-                    pg_database.dattablespace,
-                    pg_database.datacl,
-                    pg_size_pretty(pg_database_size(pg_database.datname)) as size,
-                    pg_database_size(pg_database.datname) as size_bytes,
-                    pg_user.usename as owner
-                FROM pg_database
-                JOIN pg_user ON pg_database.datdba = pg_user.usesysid
-                WHERE pg_database.datname = %s;
-            """
-            
-            cursor.execute(query, (db_name,))
-            result = cursor.fetchone()
-            
-            if result:
-                db_info = {
-                    'name': result[0],
-                    'is_template': result[1],
-                    'allow_connections': result[2],
-                    'connection_limit': result[3],
-                    'size_pretty': result[9],
-                    'size_bytes': result[10],
-                    'owner': result[11]
-                }
-            else:
-                db_info = None
-            
-            cursor.close()
-            conn.close()
-            
-            return db_info
+            try:
+                query = """
+                    SELECT 
+                        pg_database.datname,
+                        pg_database.datistemplate,
+                        pg_database.datallowconn,
+                        pg_database.datconnlimit,
+                        pg_database.datlastsysoid,
+                        pg_database.datfrozenxid,
+                        pg_database.datminmxid,
+                        pg_database.dattablespace,
+                        pg_database.datacl,
+                        pg_size_pretty(pg_database_size(pg_database.datname)) as size,
+                        pg_database_size(pg_database.datname) as size_bytes,
+                        pg_user.usename as owner
+                    FROM pg_database
+                    JOIN pg_user ON pg_database.datdba = pg_user.usesysid
+                    WHERE pg_database.datname = %s;
+                """
+                
+                cursor.execute(query, (db_name,))
+                result = cursor.fetchone()
+                
+                if result and len(result) >= 12:
+                    db_info = {
+                        'name': result[0],
+                        'is_template': result[1],
+                        'allow_connections': result[2],
+                        'connection_limit': result[3],
+                        'size_pretty': result[9],
+                        'size_bytes': result[10],
+                        'owner': result[11]
+                    }
+                else:
+                    db_info = None
+                
+                return db_info
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting database info: {str(db_error)}", Qgis.Critical)
+                return None
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting database info: {str(e)}", Qgis.Critical)
@@ -338,47 +376,52 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            # Find all qgis_projects tables in all schemas
-            query = """
-                SELECT schemaname, tablename
-                FROM pg_tables 
-                WHERE tablename = 'qgis_projects'
-                AND schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-                ORDER BY schemaname;
-            """
-            
-            cursor.execute(query)
-            tables = cursor.fetchall()
-            
-            projects = []
-            for schema, table in tables:
-                # Get projects from this table
-                project_query = f"""
-                    SELECT name, metadata 
-                    FROM "{schema}"."{table}"
-                    ORDER BY name;
+            try:
+                # Find all qgis_projects tables in all schemas
+                query = """
+                    SELECT schemaname, tablename
+                    FROM pg_tables 
+                    WHERE tablename = 'qgis_projects'
+                    AND schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                    ORDER BY schemaname;
                 """
                 
-                try:
-                    cursor.execute(project_query)
-                    table_projects = cursor.fetchall()
+                cursor.execute(query)
+                tables = cursor.fetchall()
+                
+                projects = []
+                for schema, table in tables:
+                    # Get projects from this table
+                    project_query = f"""
+                        SELECT name, metadata 
+                        FROM "{schema}"."{table}"
+                        ORDER BY name;
+                    """
                     
-                    for name, metadata in table_projects:
-                        projects.append({
-                            'schema': schema,
-                            'table': table,
-                            'name': name,
-                            'metadata': metadata
-                        })
+                    try:
+                        cursor.execute(project_query)
+                        table_projects = cursor.fetchall()
                         
-                except psycopg2.Error as e:
-                    self.log_message(f"Warning: Could not read projects from {schema}.{table}: {str(e)}", Qgis.Warning)
-            
-            cursor.close()
-            conn.close()
-            
-            self.progress_updated.emit(f"Found {len(projects)} QGIS projects")
-            return projects
+                        for name, metadata in table_projects:
+                            projects.append({
+                                'schema': schema,
+                                'table': table,
+                                'name': name,
+                                'metadata': metadata
+                            })
+                            
+                    except psycopg2.Error as e:
+                        self.log_message(f"Warning: Could not read projects from {schema}.{table}: {str(e)}", Qgis.Warning)
+                
+                self.progress_updated.emit(f"Found {len(projects)} QGIS projects")
+                return projects
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error finding QGIS projects: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error finding QGIS projects: {str(e)}", Qgis.Critical)
@@ -873,7 +916,6 @@ class DatabaseManager(QObject):
             self.log_message(f"Error uploading project content: {str(e)}", Qgis.Critical)
             return False
 
-
     def get_active_connections(self, database_name):
         """Get list of active connections to a specific database."""
         try:
@@ -883,31 +925,36 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            # Query to get active connections (excluding our own connection)
-            query = """
-                SELECT 
-                    pid,
-                    usename,
-                    client_addr,
-                    client_hostname,
-                    client_port,
-                    backend_start,
-                    state,
-                    query
-                FROM pg_stat_activity 
-                WHERE datname = %s 
-                AND pid != pg_backend_pid()
-                AND state != 'idle'
-                ORDER BY backend_start;
-            """
-            
-            cursor.execute(query, (database_name,))
-            connections = cursor.fetchall()
-            
-            cursor.close()
-            conn.close()
-            
-            return connections
+            try:
+                # Query to get active connections (excluding our own connection)
+                query = """
+                    SELECT 
+                        pid,
+                        usename,
+                        client_addr,
+                        client_hostname,
+                        client_port,
+                        backend_start,
+                        state,
+                        query
+                    FROM pg_stat_activity 
+                    WHERE datname = %s 
+                    AND pid != pg_backend_pid()
+                    AND state != 'idle'
+                    ORDER BY backend_start;
+                """
+                
+                cursor.execute(query, (database_name,))
+                connections = cursor.fetchall()
+                
+                return connections
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting active connections: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting active connections: {str(e)}", Qgis.Critical)
@@ -922,21 +969,27 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            # Count connections excluding our own
-            query = """
-                SELECT COUNT(*) 
-                FROM pg_stat_activity 
-                WHERE datname = %s 
-                AND pid != pg_backend_pid();
-            """
-            
-            cursor.execute(query, (database_name,))
-            count = cursor.fetchone()[0]
-            
-            cursor.close()
-            conn.close()
-            
-            return count
+            try:
+                # Count connections excluding our own
+                query = """
+                    SELECT COUNT(*) 
+                    FROM pg_stat_activity 
+                    WHERE datname = %s 
+                    AND pid != pg_backend_pid();
+                """
+                
+                cursor.execute(query, (database_name,))
+                result = cursor.fetchone()
+                count = result[0] if result and len(result) > 0 else 0
+                
+                return count
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting connection count: {str(db_error)}", Qgis.Critical)
+                return 0
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting connection count: {str(e)}", Qgis.Critical)
@@ -1189,23 +1242,33 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT 
-                    d.datname,
-                    shobj_description(d.oid, 'pg_database') as comment
-                FROM pg_database d
-                WHERE d.datistemplate = true 
-                AND d.datname NOT IN ('template0', 'template1')
-                ORDER BY d.datname;
-            """
-            
-            cursor.execute(query)
-            templates = cursor.fetchall()
-            
-            cursor.close()
-            conn.close()
-            
-            return templates
+            try:
+                query = """
+                    SELECT 
+                        d.datname,
+                        shobj_description(d.oid, 'pg_database') as comment
+                    FROM pg_database d
+                    WHERE d.datistemplate = true 
+                    AND d.datname NOT IN ('template0', 'template1')
+                    ORDER BY d.datname;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                templates = []
+                for row in results:
+                    if row and len(row) >= 2:
+                        templates.append((str(row[0]), row[1]))
+                
+                return templates
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting templates with comments: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting templates with comments: {str(e)}", Qgis.Critical)
@@ -1220,19 +1283,24 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT obj_description(d.oid, 'pg_database') as comment
-                FROM pg_database d
-                WHERE d.datname = %s;
-            """
-            
-            cursor.execute(query, (db_name,))
-            result = cursor.fetchone()
-            
-            cursor.close()
-            conn.close()
-            
-            return result[0] if result else None
+            try:
+                query = """
+                    SELECT obj_description(d.oid, 'pg_database') as comment
+                    FROM pg_database d
+                    WHERE d.datname = %s;
+                """
+                
+                cursor.execute(query, (db_name,))
+                result = cursor.fetchone()
+                
+                return result[0] if result and len(result) > 0 else None
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting database comment: {str(db_error)}", Qgis.Critical)
+                return None
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting database comment: {str(e)}", Qgis.Critical)
@@ -1247,24 +1315,322 @@ class DatabaseManager(QObject):
             conn = psycopg2.connect(**conn_params)
             cursor = conn.cursor()
             
-            query = """
-                SELECT 
-                    d.datname,
-                    shobj_description(d.oid, 'pg_database') as comment
-                FROM pg_database d
-                WHERE d.datistemplate = false 
-                AND d.datname NOT IN ('postgres', 'template0', 'template1')
-                ORDER BY d.datname;
-            """
-            
-            cursor.execute(query)
-            databases = cursor.fetchall()
-            
-            cursor.close()
-            conn.close()
-            
-            return databases
+            try:
+                query = """
+                    SELECT 
+                        d.datname,
+                        shobj_description(d.oid, 'pg_database') as comment
+                    FROM pg_database d
+                    WHERE d.datistemplate = false 
+                    AND d.datname NOT IN ('postgres', 'template0', 'template1')
+                    ORDER BY d.datname;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                databases = []
+                for row in results:
+                    if row and len(row) >= 2:
+                        databases.append((str(row[0]), row[1]))
+                
+                return databases
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting databases with comments: {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
             
         except psycopg2.Error as e:
             self.log_message(f"Error getting databases with comments: {str(e)}", Qgis.Critical)
             return []
+        
+    def create_database_from_database(self, source_db_name, new_db_name, db_comment=None):
+        """Create a new database from an existing database (copy)."""
+        try:
+            self.progress_updated.emit(f"Creating database '{new_db_name}' from existing database '{source_db_name}'...")
+            
+            # Check for active connections to the source database first
+            connection_count = self.get_connection_count(source_db_name)
+            if connection_count > 0:
+                self.progress_updated.emit(f"Found {connection_count} active connections to source database '{source_db_name}'")
+                
+                # Drop connections
+                if not self.drop_database_connections(source_db_name):
+                    raise Exception("Failed to drop database connections to source database")
+                
+                # Wait a moment for connections to be fully dropped
+                import time
+                time.sleep(1)
+                
+                # Verify connections are dropped
+                remaining_connections = self.get_connection_count(source_db_name)
+                if remaining_connections > 0:
+                    raise Exception(f"Still {remaining_connections} active connections to source database after termination")
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = 'postgres'
+            
+            conn = psycopg2.connect(**conn_params)
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            
+            # Drop existing database if it exists
+            if self.database_exists(new_db_name):
+                self.progress_updated.emit(f"Dropping existing database '{new_db_name}'...")
+                cursor.execute(f'DROP DATABASE "{new_db_name}";')
+            
+            # Create database from source database (includes data)
+            cursor.execute(f'CREATE DATABASE "{new_db_name}" WITH TEMPLATE "{source_db_name}";')
+            
+            # Add comment if provided
+            if db_comment:
+                self.progress_updated.emit(f"Adding comment to database...")
+                # Escape single quotes in comment
+                escaped_comment = db_comment.replace("'", "''")
+                cursor.execute(f"COMMENT ON DATABASE \"{new_db_name}\" IS '{escaped_comment}';")
+                self.progress_updated.emit(f"Comment added: {db_comment}")
+            
+            cursor.close()
+            conn.close()
+            
+            success_msg = f"Database '{new_db_name}' created successfully from existing database '{source_db_name}'!"
+            if db_comment:
+                success_msg += f" Comment: {db_comment}"
+            
+            self.progress_updated.emit(success_msg)
+            self.operation_finished.emit(True, success_msg)
+            return True
+            
+        except psycopg2.Error as e:
+            error_msg = f"Error creating database from existing database: {str(e)}"
+            self.log_message(error_msg, Qgis.Critical)
+            self.operation_finished.emit(False, error_msg)
+            return False
+        
+    def get_database_schemas(self, database_name):
+        """Get list of schemas in the specified database."""
+        try:
+            if not database_name or not isinstance(database_name, str):
+                self.log_message(f"Invalid database_name: {database_name}", Qgis.Critical)
+                return []
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = database_name
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            try:
+                query = """
+                    SELECT schema_name 
+                    FROM information_schema.schemata 
+                    WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast', 'pg_temp_1', 'pg_toast_temp_1')
+                    AND schema_name NOT LIKE 'pg_temp_%'
+                    AND schema_name NOT LIKE 'pg_toast_temp_%'
+                    ORDER BY schema_name;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                schemas = []
+                for row in results:
+                    if row and len(row) > 0 and row[0] is not None:
+                        schemas.append(str(row[0]))
+                
+                return schemas
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting schemas for database '{database_name}': {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
+            
+        except psycopg2.Error as e:
+            self.log_message(f"PostgreSQL error getting schemas for database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+        except Exception as e:
+            self.log_message(f"Unexpected error getting schemas for database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+
+
+    def get_schema_tables(self, database_name, schema_name):
+        """Get list of tables in the specified schema."""
+        try:
+            # Validate inputs
+            if not database_name or not isinstance(database_name, str):
+                self.log_message(f"Invalid database_name: {database_name}", Qgis.Critical)
+                return []
+            
+            if not schema_name or not isinstance(schema_name, str):
+                self.log_message(f"Invalid schema_name: {schema_name}", Qgis.Critical)
+                return []
+            
+            self.progress_updated.emit(f"Getting tables for schema '{schema_name}' in database '{database_name}'...")
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = database_name
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            try:
+                # First, verify that the schema exists
+                schema_check_query = """
+                    SELECT schema_name 
+                    FROM information_schema.schemata 
+                    WHERE schema_name = %s;
+                """
+                
+                cursor.execute(schema_check_query, (schema_name,))
+                schema_result = cursor.fetchone()
+                
+                # Check if schema exists
+                if schema_result is None:
+                    self.log_message(f"Schema '{schema_name}' does not exist in database '{database_name}'", Qgis.Warning)
+                    return []
+                
+                # Use string formatting approach (safe because we validated schema_name)
+                # Escape single quotes in schema_name to prevent SQL injection
+                safe_schema_name = schema_name.replace("'", "''")
+                
+                query = f"""
+                    SELECT tablename 
+                    FROM pg_tables 
+                    WHERE schemaname = '{safe_schema_name}'
+                    AND tablename NOT LIKE 'pg_%'
+                    ORDER BY tablename;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                # Process the results safely
+                tables = []
+                for row in results:
+                    if row and len(row) > 0 and row[0] is not None:
+                        tables.append(str(row[0]))
+                
+                self.progress_updated.emit(f"Found {len(tables)} tables in schema '{schema_name}'")
+                return tables
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting tables for schema '{schema_name}': {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
+            
+        except psycopg2.Error as e:
+            self.log_message(f"PostgreSQL error getting tables for schema '{schema_name}' in database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+        except Exception as e:
+            self.log_message(f"Unexpected error getting tables for schema '{schema_name}' in database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+
+    def get_database_tables(self, database_name):
+        """Get list of tables in the specified database (fallback method)."""
+        try:
+            if not database_name or not isinstance(database_name, str):
+                self.log_message(f"Invalid database_name: {database_name}", Qgis.Critical)
+                return []
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = database_name
+            
+            conn = psycopg2.connect(**conn_params)
+            cursor = conn.cursor()
+            
+            try:
+                query = """
+                    SELECT tablename 
+                    FROM pg_tables 
+                    WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                    AND tablename NOT LIKE 'pg_%'
+                    ORDER BY tablename;
+                """
+                
+                cursor.execute(query)
+                results = cursor.fetchall()
+                
+                tables = []
+                for row in results:
+                    if row and len(row) > 0 and row[0] is not None:
+                        tables.append(str(row[0]))
+                
+                return tables
+                
+            except psycopg2.Error as db_error:
+                self.log_message(f"Database error getting tables for database '{database_name}': {str(db_error)}", Qgis.Critical)
+                return []
+            finally:
+                cursor.close()
+                conn.close()
+            
+        except psycopg2.Error as e:
+            self.log_message(f"PostgreSQL error getting tables for database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+        except Exception as e:
+            self.log_message(f"Unexpected error getting tables for database '{database_name}': {str(e)}", Qgis.Critical)
+            return []
+
+    def truncate_schema_tables(self, database_name, schema_name, table_names):
+        """Truncate specified tables in the given schema."""
+        try:
+            self.progress_updated.emit(f"Truncating {len(table_names)} tables in schema '{schema_name}' of database '{database_name}'...")
+            
+            conn_params = self.connection_params.copy()
+            conn_params['database'] = database_name
+            
+            conn = psycopg2.connect(**conn_params)
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cursor = conn.cursor()
+            
+            try:
+                truncated_count = 0
+                failed_tables = []
+                
+                for table_name in table_names:
+                    try:
+                        # Use CASCADE to handle foreign key constraints
+                        cursor.execute(f'TRUNCATE TABLE "{schema_name}"."{table_name}" CASCADE;')
+                        truncated_count += 1
+                        self.progress_updated.emit(f"Truncated: {schema_name}.{table_name}")
+                        
+                    except psycopg2.Error as table_error:
+                        failed_tables.append(table_name)
+                        self.log_message(f"Failed to truncate {schema_name}.{table_name}: {str(table_error)}", Qgis.Warning)
+                        self.progress_updated.emit(f"Failed to truncate: {schema_name}.{table_name} - {str(table_error)}")
+                
+                # Prepare result message
+                if truncated_count > 0:
+                    success_msg = f"Successfully truncated {truncated_count} table(s) in schema '{schema_name}'"
+                    if failed_tables:
+                        success_msg += f" (Failed: {len(failed_tables)} table(s))"
+                    
+                    self.progress_updated.emit(success_msg)
+                    self.operation_finished.emit(True, success_msg)
+                    return True
+                else:
+                    error_msg = f"No tables were truncated in schema '{schema_name}'"
+                    self.operation_finished.emit(False, error_msg)
+                    return False
+                    
+            except psycopg2.Error as db_error:
+                error_msg = f"Database error truncating tables in schema '{schema_name}': {str(db_error)}"
+                self.log_message(error_msg, Qgis.Critical)
+                self.operation_finished.emit(False, error_msg)
+                return False
+            finally:
+                cursor.close()
+                conn.close()
+            
+        except psycopg2.Error as e:
+            error_msg = f"Error truncating tables in schema '{schema_name}': {str(e)}"
+            self.log_message(error_msg, Qgis.Critical)
+            self.operation_finished.emit(False, error_msg)
+            return False

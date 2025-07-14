@@ -58,7 +58,8 @@ class QGISProjectsTab(BaseTab):
         db_select_layout = QHBoxLayout()
         self.qgis_db_combo = QComboBox()
         self.refresh_qgis_db_btn = QPushButton("Refresh")
-        self.refresh_qgis_db_btn.clicked.connect(self.refresh_qgis_databases)
+        # FIX: Use lambda to ignore the boolean argument from clicked signal
+        self.refresh_qgis_db_btn.clicked.connect(lambda: self.refresh_qgis_databases())
         self.search_projects_btn = QPushButton("Search Projects")
         self.search_projects_btn.clicked.connect(self.search_qgis_projects)
         
@@ -124,7 +125,7 @@ class QGISProjectsTab(BaseTab):
         params_layout.addWidget(self.fix_project_btn)
         
         layout.addWidget(params_section)
-    
+
     def _show_help_popup(self):
         """Show help information in a popup dialog."""
         help_text = (

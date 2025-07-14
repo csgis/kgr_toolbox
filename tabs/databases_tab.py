@@ -1,13 +1,13 @@
 """
 Databases tab for PostgreSQL Template Manager with database deletion functionality.
-Enhanced with comment display.
+Enhanced with comment display and ability to create from templates OR existing databases.
 """
 
 from qgis.PyQt.QtCore import pyqtSignal, Qt
 from qgis.PyQt.QtWidgets import (QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, 
                                 QLineEdit, QPushButton, QGroupBox, QTableWidget, QTableWidgetItem,
                                 QLabel, QMessageBox, QDialog, QCheckBox, QTextEdit,
-                                QFrame, QSizePolicy, QHeaderView)
+                                QFrame, QSizePolicy, QHeaderView, QRadioButton, QButtonGroup)
 from qgis.PyQt.QtGui import QFont, QPixmap
 from .base_tab import BaseTab
 
@@ -140,7 +140,7 @@ class DatabaseDeletionDialog(QDialog):
         """)
         self.cancel_button.clicked.connect(self.reject)
         
-        self.delete_button = QPushButton("🗑️ DELETE DATABASE")
+        self.delete_button = QPushButton("DELETE DATABASE")
         self.delete_button.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
@@ -196,13 +196,15 @@ class DatabaseDeletionDialog(QDialog):
 
 
 class DatabasesTab(BaseTab):
-    """Tab for managing databases created from templates."""
+    """Tab for managing databases created from templates or existing databases."""
     
     # Signals
     databases_refreshed = pyqtSignal(list)  # List of database names
     
     def __init__(self, db_manager, parent=None):
         super().__init__(db_manager, parent)
+        self.current_templates = []
+        self.current_databases = []
     
     def setup_ui(self):
         """Setup the databases tab UI."""
@@ -237,15 +239,42 @@ class DatabasesTab(BaseTab):
         layout.addLayout(title_layout)
         
         # Create database section
-        create_group = QGroupBox("Create Database from Template")
+        create_group = QGroupBox("Create Database")
         create_layout = QFormLayout(create_group)
         
-        self.template_combo = QComboBox()
+        # Source type selection
+        source_type_layout = QHBoxLayout()
+        self.source_type_group = QButtonGroup()
+        
+        self.from_template_radio = QRadioButton("From Template")
+        self.from_template_radio.setChecked(True)
+        self.from_template_radio.toggled.connect(self.on_source_type_changed)
+        
+        self.from_database_radio = QRadioButton("From Existing Database")
+        self.from_database_radio.toggled.connect(self.on_source_type_changed)
+        
+        self.source_type_group.addButton(self.from_template_radio)
+        self.source_type_group.addButton(self.from_database_radio)
+        
+        source_type_layout.addWidget(self.from_template_radio)
+        source_type_layout.addWidget(self.from_database_radio)
+        source_type_layout.addStretch()
+        
+        create_layout.addRow("Source Type:", source_type_layout)
+        
+        # Source selection combo
+        self.source_combo = QComboBox()
+        self.source_label = QLabel("Template:")
+        create_layout.addRow(self.source_label, self.source_combo)
+        
+        # New database name
         self.new_db_name_edit = QLineEdit()
+        create_layout.addRow("New Database Name:", self.new_db_name_edit)
         
         # Add comment field
         self.db_comment_edit = QLineEdit()
         self.db_comment_edit.setPlaceholderText("Optional description for the database (e.g., 'Development environment for project X')")
+        create_layout.addRow("Comment:", self.db_comment_edit)
         
         self.create_db_btn = QPushButton("Create Database")
         self.create_db_btn.setStyleSheet("""
@@ -263,9 +292,6 @@ class DatabasesTab(BaseTab):
         """)
         self.create_db_btn.clicked.connect(self.create_database)
         
-        create_layout.addRow("Template:", self.template_combo)
-        create_layout.addRow("New Database Name:", self.new_db_name_edit)
-        create_layout.addRow("Comment:", self.db_comment_edit)
         create_layout.addWidget(self.create_db_btn)
         
         layout.addWidget(create_group)
@@ -277,40 +303,10 @@ class DatabasesTab(BaseTab):
         # Buttons row
         buttons_layout = QHBoxLayout()
         
-        self.refresh_databases_btn = QPushButton("🔄 Refresh")
-        self.refresh_databases_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
+        self.refresh_databases_btn = QPushButton("Refresh")
         self.refresh_databases_btn.clicked.connect(self.refresh_databases)
         
-        self.delete_db_btn = QPushButton("🗑️ Delete Database")
-        self.delete_db_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.delete_db_btn = QPushButton("Delete Database")
         self.delete_db_btn.clicked.connect(self.delete_database)
         self.delete_db_btn.setEnabled(False)
         
@@ -339,15 +335,46 @@ class DatabasesTab(BaseTab):
         
         layout.addWidget(management_group)
 
+    def on_source_type_changed(self):
+        """Handle source type radio button changes."""
+        if self.from_template_radio.isChecked():
+            self.source_label.setText("Template:")
+            self.refresh_source_combo()
+        else:
+            self.source_label.setText("Source Database:")
+            self.refresh_source_combo()
+
+    def refresh_source_combo(self):
+        """Refresh the source combo box based on selected source type."""
+        current_selection = self.source_combo.currentText()
+        self.source_combo.clear()
+        
+        if self.from_template_radio.isChecked():
+            # Show templates
+            self.source_combo.addItems(self.current_templates)
+            if current_selection in self.current_templates:
+                self.source_combo.setCurrentText(current_selection)
+        else:
+            # Show databases (excluding system databases and current database)
+            available_databases = []
+            for db_name in self.current_databases:
+                if (not self.db_manager.is_system_database(db_name) and 
+                    db_name != self.db_manager.connection_params.get('database')):
+                    available_databases.append(db_name)
+            
+            self.source_combo.addItems(available_databases)
+            if current_selection in available_databases:
+                self.source_combo.setCurrentText(current_selection)
+
     def _show_help_popup(self):
         """Show help information in a popup dialog."""
         help_text = (
             "<h3>Database Manager</h3>"
-            "<p>Create and manage PostgreSQL databases from templates.</p>"
+            "<p>Create and manage PostgreSQL databases from templates or existing databases.</p>"
             "<h4>🆕 Database Creation:</h4>"
             "<ul>"
-            "<li><b>From Template:</b> All tables, views, functions, and indexes are copied</li>"
-            "<li><b>Empty data:</b> Structure is identical, but tables start empty</li>"
+            "<li><b>From Template:</b> Creates database from template with empty data</li>"
+            "<li><b>From Existing Database:</b> Creates a copy of an existing database</li>"
             "<li><b>Ready to use:</b> Database is immediately available for connections</li>"
             "</ul>"
             "<h4>🗑️ Database Deletion:</h4>"
@@ -363,14 +390,10 @@ class DatabasesTab(BaseTab):
             "</ul>"
             "<h4>📋 Database Creation Process:</h4>"
             "<ol>"
-            "<li><b>Select template:</b> Choose from available database templates</li>"
+            "<li><b>Choose source type:</b> Select template or existing database</li>"
+            "<li><b>Select source:</b> Choose from available templates or databases</li>"
             "<li><b>Name database:</b> Enter a unique name (letters, numbers, underscores only)</li>"
-            "<li><b>Characters:</b> Only letters, numbers, and underscores allowed</li>"
-            "<li><b>Start with:</b> Must begin with a letter or underscore</li>"
-            "<li><b>Length:</b> Maximum 63 characters</li>"
-            "<li><b>Uniqueness:</b> Name must not already exist on the server</li>"
-            "<li><b>Create:</b> PostgreSQL clones the template structure </li>"
-            "<li><b>Connect:</b> New database is ready for immediate use</li>"
+            "<li><b>Create:</b> PostgreSQL creates the new database</li>"
             "</ol>"
             "<h4>🔥 Database Deletion Process:</h4>"
             "<ol>"
@@ -447,31 +470,36 @@ class DatabasesTab(BaseTab):
                 comment_item.setFlags(comment_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
                 self.databases_table.setItem(row, 1, comment_item)
             
+            # Update current databases list
+            self.current_databases = database_names
+            
+            # Refresh source combo if showing databases
+            if self.from_database_radio.isChecked():
+                self.refresh_source_combo()
+            
             self.emit_log(f"Refreshed databases: {len(databases_with_comments)} found")
             self.databases_refreshed.emit(database_names)
         except Exception as e:
             self.emit_log(f"Error refreshing databases: {str(e)}")
     
     def refresh_templates(self, templates):
-        """Refresh templates combo box."""
-        current_selection = self.template_combo.currentText()
-        self.template_combo.clear()
-        self.template_combo.addItems(templates)
+        """Refresh templates list."""
+        self.current_templates = templates
         
-        # Restore previous selection if it still exists
-        if current_selection in templates:
-            self.template_combo.setCurrentText(current_selection)
+        # Refresh source combo if showing templates
+        if self.from_template_radio.isChecked():
+            self.refresh_source_combo()
     
     def create_database(self):
-        """Create database from selected template."""
+        """Create database from selected template or existing database."""
         if not self.check_connection():
             return
         
-        template_name = self.template_combo.currentText()
+        source_name = self.source_combo.currentText()
         new_db_name = self.new_db_name_edit.text().strip()
         db_comment = self.db_comment_edit.text().strip()
         
-        if not self.validate_selection(self.template_combo, "template"):
+        if not self.validate_selection(self.source_combo, "source"):
             return
         
         if not self.validate_non_empty_field(new_db_name, "database name"):
@@ -492,7 +520,19 @@ class DatabasesTab(BaseTab):
             return
         
         self.emit_progress_started()
-        self.db_manager.create_database_from_template(template_name, new_db_name, db_comment)
+        
+        if self.from_template_radio.isChecked():
+            # Create from template
+            self.db_manager.create_database_from_template(source_name, new_db_name, db_comment)
+        else:
+            # Create from existing database
+            # Check if the database manager has the method for creating from database
+            if hasattr(self.db_manager, 'create_database_from_database'):
+                self.db_manager.create_database_from_database(source_name, new_db_name, db_comment)
+            else:
+                # Fallback: use template method with a warning
+                self.emit_log("⚠️ Warning: Creating database copy using template method")
+                self.db_manager.create_database_from_template(source_name, new_db_name, db_comment)
     
     def delete_database(self):
         """Delete selected database with confirmation."""

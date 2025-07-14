@@ -7,7 +7,7 @@ from qgis.PyQt.QtWidgets import (QDockWidget, QVBoxLayout, QHBoxLayout, QWidget,
                                 QTabWidget, QGroupBox, QProgressBar, QTextEdit, QPushButton)
 from qgis.PyQt.QtGui import QFont
 
-from .tabs import ConnectionTab, TemplatesTab, DatabasesTab, QGISProjectsTab, ArchiveProjectTab
+from .tabs import ConnectionTab, TemplatesTab, DatabasesTab, TruncateTablesTab, QGISProjectsTab, ArchiveProjectTab, CleanQGSTab
 
 
 class KgrToolBoxDialog(QDockWidget):
@@ -53,16 +53,20 @@ class KgrToolBoxDialog(QDockWidget):
         self.connection_tab = ConnectionTab(self.db_manager, self)
         self.templates_tab = TemplatesTab(self.db_manager, self)
         self.databases_tab = DatabasesTab(self.db_manager, self)
+        self.truncate_tab = TruncateTablesTab(self.db_manager, self)
         self.qgis_projects_tab = QGISProjectsTab(self.db_manager, self)
         self.archive_project_tab = ArchiveProjectTab(self.db_manager, self)
-        
+        self.clean_qgs_tab = CleanQGSTab(self.db_manager, self)
+
         # Add tabs to widget
         self.tab_widget.addTab(self.connection_tab, "Connection")
         self.tab_widget.addTab(self.templates_tab, "Templates")
         self.tab_widget.addTab(self.databases_tab, "Databases")
+        self.tab_widget.addTab(self.truncate_tab, "Truncate Tables")
         self.tab_widget.addTab(self.qgis_projects_tab, "Fix QGIS Project Layers")
         self.tab_widget.addTab(self.archive_project_tab, "Archive Project")
-        
+        self.tab_widget.addTab(self.clean_qgs_tab, "Clean QGS Files")
+
         # Progress section
         self.setup_progress_section(layout)
     
@@ -82,18 +86,6 @@ class KgrToolBoxDialog(QDockWidget):
         
         self.clear_logs_btn = QPushButton("Clear Logs")
         self.clear_logs_btn.setFixedWidth(100)
-        self.clear_logs_btn.setStyleSheet(
-            "QPushButton { "
-            "background-color: #f44336; "
-            "color: white; "
-            "font-weight: bold; "
-            "padding: 4px 8px; "
-            "border: none; "
-            "border-radius: 3px; "
-            "font-size: 11px; "
-            "} "
-            "QPushButton:hover { background-color: #d32f2f; }"
-        )
         self.clear_logs_btn.clicked.connect(self.clear_logs)
         
         log_header_layout.addWidget(log_label)
@@ -124,15 +116,24 @@ class KgrToolBoxDialog(QDockWidget):
         # Databases tab signals
         self.databases_tab.databases_refreshed.connect(self.on_databases_refreshed)
         
+        # Truncate tab signals
+        self.truncate_tab.tables_truncated.connect(self.on_tables_truncated)
+        
         # QGIS projects tab signals
         self.qgis_projects_tab.projects_found.connect(self.on_projects_found)
         
         # Archive project tab signals
         self.archive_project_tab.project_archived.connect(self.on_project_archived)
         
+        # Clean QGS tab signals
+        self.clean_qgs_tab.file_cleaned.connect(self.on_file_cleaned)
+
+
+        # Connect all tab log signals to main log
         # Connect all tab log signals to main log
         tabs = [self.connection_tab, self.templates_tab, 
-                self.databases_tab, self.qgis_projects_tab, self.archive_project_tab]
+                self.databases_tab, self.truncate_tab, self.qgis_projects_tab, 
+                self.archive_project_tab, self.clean_qgs_tab]
         
         for tab in tabs:
             tab.log_message.connect(self.log_message)
@@ -156,12 +157,24 @@ class KgrToolBoxDialog(QDockWidget):
         self.templates_tab.refresh_source_databases(databases)
         # Update QGIS projects tab with databases
         self.qgis_projects_tab.refresh_qgis_databases(databases)
+        # Update truncate tab with databases
+        self.truncate_tab.refresh_databases(databases)
+    
+    def on_tables_truncated(self, database_name, table_count):
+        """Handle tables truncated."""
+        self.log_message(f"Successfully truncated {table_count} table(s) in database '{database_name}'")
     
     def on_projects_found(self, projects):
         """Handle QGIS projects found."""
         # Could be used for additional processing if needed
         pass
     
+    def on_file_cleaned(self, cleaned_file_path):
+        """Handle file cleaned signal."""
+        import os
+        filename = os.path.basename(cleaned_file_path)
+        self.log_message(f"QGS file cleaned successfully: {filename}")
+
     def on_project_archived(self, archive_path):
         """Handle project archived."""
         self.log_message(f"Project archived successfully to: {archive_path}")
