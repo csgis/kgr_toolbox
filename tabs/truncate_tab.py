@@ -22,7 +22,7 @@ class TruncateConfirmationDialog(QDialog):
         self.table_count = table_count
         self.excluded_tables = excluded_tables
         
-        self.setWindowTitle("⚠️ TRUNCATE TABLES - WARNING")
+        self.setWindowTitle("TRUNCATE TABLES - WARNING")
         self.setModal(True)
         self.setMinimumSize(500, 400)
         
@@ -32,28 +32,7 @@ class TruncateConfirmationDialog(QDialog):
         """Setup the dialog UI."""
         layout = QVBoxLayout()
         
-        # Warning header
-        warning_frame = QFrame()
-        warning_frame.setStyleSheet("""
-            QFrame {
-                background-color: #fff3e0;
-                border-radius: 5px;
-                padding: 10px;
-            }
-        """)
-        warning_layout = QVBoxLayout(warning_frame)
-        
-        # Large warning icon and text
-        warning_label = QLabel("⚠️ DANGER: TABLE TRUNCATION")
-        warning_font = QFont()
-        warning_font.setPointSize(16)
-        warning_font.setBold(True)
-        warning_label.setFont(warning_font)
-        warning_label.setAlignment(Qt.AlignCenter)
-        warning_label.setStyleSheet("color: #e65100;")
-        warning_layout.addWidget(warning_label)
-        
-        layout.addWidget(warning_frame)
+
         
         # Operation information
         info_label = QLabel("You are about to TRUNCATE TABLES in the following database:")
@@ -64,7 +43,6 @@ class TruncateConfirmationDialog(QDialog):
         details_frame = QFrame()
         details_frame.setStyleSheet("""
             QFrame {
-                background-color: #f3e5f5;
                 border-radius: 5px;
                 padding: 10px;
                 margin: 10px 0;
@@ -72,16 +50,16 @@ class TruncateConfirmationDialog(QDialog):
         """)
         details_layout = QVBoxLayout(details_frame)
         
-        db_name_label = QLabel(f"📂 Database: {self.database_name}")
+        db_name_label = QLabel(f"Database: {self.database_name}")
         db_name_label.setStyleSheet("font-weight: bold; font-size: 16px; color: #4a148c;")
         details_layout.addWidget(db_name_label)
         
-        tables_label = QLabel(f"📊 Tables to truncate: {self.table_count}")
+        tables_label = QLabel(f"Tables to truncate: {self.table_count}")
         tables_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #6a1b9a;")
         details_layout.addWidget(tables_label)
         
         if self.excluded_tables:
-            excluded_label = QLabel(f"🛡️ Excluded tables: {', '.join(self.excluded_tables)}")
+            excluded_label = QLabel(f"Excluded tables: {', '.join(self.excluded_tables)}")
             excluded_label.setStyleSheet("font-weight: bold; font-size: 12px; color: #388e3c;")
             details_layout.addWidget(excluded_label)
         
@@ -93,7 +71,7 @@ class TruncateConfirmationDialog(QDialog):
         warning_text.setMaximumHeight(120)
         warning_text.setStyleSheet("background-color: #ffebee;")
         warning_text.setPlainText(
-            "⚠️ WARNING: This action will DELETE ALL DATA from the selected tables!\n\n"
+            "WARNING: This action will DELETE ALL DATA from the selected tables!\n\n"
             "• ALL rows in the affected tables will be permanently removed\n"
             "• Table structure (columns, indexes, constraints) will remain intact\n"
             "• This operation cannot be undone\n"
@@ -105,10 +83,10 @@ class TruncateConfirmationDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(0, 20, 0, 0)
         
-        self.cancel_button = QPushButton("❌ Cancel")
+        self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setStyleSheet("""
             QPushButton {
-                background-color: #4caf50;
+                background-color: #666;
                 color: white;
                 font-weight: bold;
                 padding: 10px 20px;
@@ -121,10 +99,10 @@ class TruncateConfirmationDialog(QDialog):
         """)
         self.cancel_button.clicked.connect(self.reject)
         
-        self.truncate_button = QPushButton("🗑️ TRUNCATE TABLES")
+        self.truncate_button = QPushButton("TRUNCATE TABLES")
         self.truncate_button.setStyleSheet("""
             QPushButton {
-                background-color: #ff9800;
+                background-color: #ff0000;
                 color: white;
                 font-weight: bold;
                 padding: 10px 20px;
@@ -244,17 +222,11 @@ class TruncateTablesTab(BaseTab):
         # Truncate section
         truncate_group = QGroupBox("Truncate Operation")
         truncate_layout = QVBoxLayout(truncate_group)
-        
-        # Warning text
-        warning_text = QLabel("⚠️ WARNING: Truncation will permanently delete all data from the selected tables!")
-        warning_text.setStyleSheet("color: #f44336; font-weight: bold; font-size: 14px;")
-        warning_text.setWordWrap(True)
-        truncate_layout.addWidget(warning_text)
-        
-        self.truncate_btn = QPushButton("🗑️ Truncate Tables")
+                
+        self.truncate_btn = QPushButton("Truncate Tables")
         self.truncate_btn.setStyleSheet("""
             QPushButton {
-                background-color: #ff9800;
+                background-color: #e50000;
                 color: white;
                 font-weight: bold;
                 padding: 12px 24px;
@@ -263,7 +235,7 @@ class TruncateTablesTab(BaseTab):
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #f57c00;
+                background-color: #ff0000;
             }
             QPushButton:disabled {
                 background-color: #cccccc;
