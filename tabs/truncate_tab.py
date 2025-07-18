@@ -288,7 +288,6 @@ class TruncateTablesTab(BaseTab):
         msg.setWindowTitle("Help - Truncate Tables")
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
-        msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Ok)
         
         # Make dialog appropriately sized

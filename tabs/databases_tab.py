@@ -371,31 +371,31 @@ class DatabasesTab(BaseTab):
         help_text = (
             "<h3>Database Manager</h3>"
             "<p>Create and manage PostgreSQL databases from templates or existing databases.</p>"
-            "<h4>🆕 Database Creation:</h4>"
+            "<h4>Database Creation:</h4>"
             "<ul>"
             "<li><b>From Template:</b> Creates database from template with empty data</li>"
             "<li><b>From Existing Database:</b> Creates a copy of an existing database</li>"
             "<li><b>Ready to use:</b> Database is immediately available for connections</li>"
             "</ul>"
-            "<h4>🗑️ Database Deletion:</h4>"
+            "<h4>Database Deletion:</h4>"
             "<ul>"
-            "<li><b>⚠️ IRREVERSIBLE:</b> Once deleted, data cannot be recovered</li>"
+            "<li><b>IRREVERSIBLE:</b> Once deleted, data cannot be recovered</li>"
             "<li><b>Strong warning:</b> Single confirmation dialog with clear consequences</li>"
             "<li><b>Safety checks:</b> Prevents deletion of system databases</li>"
             "</ul>"
-            "<h4>💬 Database Comments:</h4>"
+            "<h4>Database Comments:</h4>"
             "<ul>"
             "<li><b>Documentation:</b> Comments help identify database purpose and content</li>"
             "<li><b>Metadata:</b> Comments are stored in PostgreSQL's system catalog</li>"
             "</ul>"
-            "<h4>📋 Database Creation Process:</h4>"
+            "<h4>Database Creation Process:</h4>"
             "<ol>"
             "<li><b>Choose source type:</b> Select template or existing database</li>"
             "<li><b>Select source:</b> Choose from available templates or databases</li>"
             "<li><b>Name database:</b> Enter a unique name (letters, numbers, underscores only)</li>"
             "<li><b>Create:</b> PostgreSQL creates the new database</li>"
             "</ol>"
-            "<h4>🔥 Database Deletion Process:</h4>"
+            "<h4>Database Deletion Process:</h4>"
             "<ol>"
             "<li><b>Select database:</b> Choose database from the list</li>"
             "<li><b>Type database name:</b> Confirm by typing exact database name</li>"
@@ -407,7 +407,6 @@ class DatabasesTab(BaseTab):
         msg.setWindowTitle("Help - Database Manager")
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
-        msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Ok)
         
         # Make dialog larger to accommodate more text

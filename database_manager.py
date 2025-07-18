@@ -1044,10 +1044,23 @@ class DatabaseManager(QObject):
             self.progress_updated.emit(error_msg)
             return False
 
-    def create_template(self, source_db, template_name, template_comment=None):
-        """Create a template from source database with optional comment."""
+    def create_template(self, source_db, template_name, template_comment=None, 
+                    preserve_qgis_projects=False, excluded_schemas=None):
+        """Create a template from source database with optional comment and data preservation options."""
         try:
+            if excluded_schemas is None:
+                excluded_schemas = []
+            
             self.progress_updated.emit(f"Creating template '{template_name}' from '{source_db}'...")
+            
+            # Log preservation settings
+            if preserve_qgis_projects or excluded_schemas:
+                preservation_info = []
+                if preserve_qgis_projects:
+                    preservation_info.append("qgis_projects table will be preserved")
+                if excluded_schemas:
+                    preservation_info.append(f"schemas {excluded_schemas} will be preserved")
+                self.progress_updated.emit(f"Data preservation: {'; '.join(preservation_info)}")
             
             # Check for active connections first
             connection_count = self.get_connection_count(source_db)
@@ -1090,9 +1103,7 @@ class DatabaseManager(QObject):
                 cursor.execute(f"COMMENT ON DATABASE \"{template_name}\" IS '{escaped_comment}';")
                 self.progress_updated.emit(f"Comment added: {template_comment}")
             
-            self.progress_updated.emit("Removing data from template...")
-            
-            # Connect to template database to remove data
+            # Connect to template database to remove data selectively
             cursor.close()
             conn.close()
             
@@ -1113,20 +1124,49 @@ class DatabaseManager(QObject):
             
             tables = template_cursor.fetchall()
             
-            # Truncate all tables
+            # Process tables with selective preservation
+            truncated_count = 0
+            preserved_count = 0
+            
+            self.progress_updated.emit("Processing tables with data preservation rules...")
+            
             for schema, table in tables:
+                # Check if this schema should be excluded entirely
+                if schema in excluded_schemas:
+                    self.progress_updated.emit(f"Preserving data in {schema}.{table} (excluded schema)")
+                    preserved_count += 1
+                    continue
+                
+                # Check if this is the qgis_projects table and should be preserved
+                if preserve_qgis_projects and table == 'qgis_projects':
+                    self.progress_updated.emit(f"Preserving data in {schema}.{table} (qgis_projects table)")
+                    preserved_count += 1
+                    continue
+                
+                # Truncate this table
                 try:
                     template_cursor.execute(f'TRUNCATE TABLE "{schema}"."{table}" CASCADE;')
                     self.progress_updated.emit(f"Cleared data from {schema}.{table}")
+                    truncated_count += 1
                 except psycopg2.Error as e:
                     self.log_message(f"Warning: Could not truncate {schema}.{table}: {str(e)}", Qgis.Warning)
             
             template_cursor.close()
             template_conn.close()
             
+            # Prepare success message with detailed info
             success_msg = f"Template '{template_name}' created successfully!"
             if template_comment:
                 success_msg += f" Comment: {template_comment}"
+            
+            details = []
+            if truncated_count > 0:
+                details.append(f"{truncated_count} tables truncated")
+            if preserved_count > 0:
+                details.append(f"{preserved_count} tables preserved")
+            
+            if details:
+                success_msg += f" ({', '.join(details)})"
             
             self.progress_updated.emit(success_msg)
             self.operation_finished.emit(True, success_msg)
@@ -1137,7 +1177,7 @@ class DatabaseManager(QObject):
             self.log_message(error_msg, Qgis.Critical)
             self.operation_finished.emit(False, error_msg)
             return False
-
+    
     def create_database_from_template(self, template_name, new_db_name, db_comment=None):
         """Create a new database from template with optional comment."""
         try:

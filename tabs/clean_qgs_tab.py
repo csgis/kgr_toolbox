@@ -184,7 +184,6 @@ class CleanQGSTab(BaseTab):
         msg.setWindowTitle("Help - QGS File Credential Cleaner")
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
-        msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
     

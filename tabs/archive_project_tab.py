@@ -227,7 +227,6 @@ class ArchiveProjectTab(BaseTab):
         msg.setWindowTitle("Help - Portable Project Archiver")
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
-        msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
 

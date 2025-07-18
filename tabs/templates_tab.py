@@ -7,7 +7,7 @@ from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import (QVBoxLayout, QHBoxLayout, QFormLayout, 
                                 QComboBox, QLineEdit, QPushButton, QGroupBox,
                                 QTableWidget, QTableWidgetItem, QMessageBox, QDialog, QDialogButtonBox,
-                                QLabel, QTextEdit, QHeaderView)
+                                QLabel, QTextEdit, QHeaderView, QCheckBox)
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QFont
 from .base_tab import BaseTab
@@ -140,12 +140,25 @@ class TemplatesTab(BaseTab):
         self.template_comment_edit = QLineEdit()
         self.template_comment_edit.setPlaceholderText("Optional description for the template (e.g., 'Production schema template for project X')")
         
+        # Add checkbox for qgis_projects table protection
+        self.protect_qgis_projects_checkbox = QCheckBox("Preserve qgis_projects table data")
+        self.protect_qgis_projects_checkbox.setChecked(True)  # Default checked
+        self.protect_qgis_projects_checkbox.setToolTip("When checked, the 'qgis_projects' table will not be truncated and its data will be preserved in the template")
+        
+        # Add input for schema exclusions
+        self.exclude_schemas_edit = QLineEdit()
+        self.exclude_schemas_edit.setText("listen")  # Prefill with "listen"
+        self.exclude_schemas_edit.setPlaceholderText("Comma-separated list of schemas to preserve (e.g., listen, metadata, system)")
+        self.exclude_schemas_edit.setToolTip("Enter schema names separated by commas. Tables in these schemas will not be truncated and their data will be preserved in the template")
+        
         self.create_template_btn = QPushButton("Create Template")
         self.create_template_btn.clicked.connect(self.create_template)
         
         create_layout.addRow("Source Database:", self.source_db_combo)
         create_layout.addRow("Template Name:", self.template_name_edit)
         create_layout.addRow("Comment:", self.template_comment_edit)
+        create_layout.addRow("", self.protect_qgis_projects_checkbox)
+        create_layout.addRow("Exclude Schemas:", self.exclude_schemas_edit)
         create_layout.addWidget(self.create_template_btn)
         
         layout.addWidget(create_group)
@@ -192,20 +205,24 @@ class TemplatesTab(BaseTab):
             "<li><b>Name the template:</b> Give your template a descriptive name</li>"
             "<li><b>Add comment (optional):</b> Provide a description to help identify the template's purpose, "
             "such as 'Production schema for customer management system' or 'Development environment template'</li>"
+            "<li><b>Configure data preservation:</b> Choose which tables/schemas to preserve data from</li>"
             "<li><b>Structure copied:</b> All tables, views, functions, indexes are copied</li>"
-            "<li><b>Data removed:</b> Template contains no records (empty tables)</li>"
+            "<li><b>Data handling:</b> By default, template contains no records, but you can preserve specific tables/schemas</li>"
             "<li><b>Template ready:</b> Use template to create new databases instantly</li>"
             "</ol>"
+            "<h4>Data Preservation Options:</h4>"
+            "<ul>"
+            "<li><b>Preserve qgis_projects table:</b> When checked, the 'qgis_projects' table data will be kept in the template</li>"
+            "<li><b>Exclude Schemas:</b> Comma-separated list of schema names whose tables will not be truncated</li>"
+            "</ul>"
             "<h4>Template Comments:</h4>"
             "<p>The <b>comment field</b> allows you to add a descriptive note to your template that will be stored "
-            "in the PostgreSQL database catalog. This helps you and other users understand the purpose and content "
-            "of each template. Comments are especially useful when managing multiple templates.</p>"
+            "in the PostgreSQL database catalog. This helps you and other users understand the purpose and content. </p>"
             "<h4>⚠️ Important notes:</h4>"
             "<ul>"
             "<li><b>Active connections:</b> All connections to source database will be dropped during creation</li>"
-            "<li><b>Structure only:</b> Templates preserve schema but remove all data</li>"
-            "<li><b>PostgreSQL feature:</b> Uses native PostgreSQL template functionality</li>"
-            "<li><b>Comments are permanent:</b> Once set, comments become part of the database metadata</li>"
+            "<li><b>Structure preserved:</b> Templates preserve schema and optionally selected data</li>"
+            "<li><b>Schema exclusions:</b> Tables in excluded schemas will keep their data in the template</li>"
             "</ul>"
         )
         
@@ -213,7 +230,6 @@ class TemplatesTab(BaseTab):
         msg.setWindowTitle("Help - PostgreSQL Template Manager")
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
-        msg.setIcon(QMessageBox.Information)
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
     
@@ -271,6 +287,15 @@ class TemplatesTab(BaseTab):
         template_name = self.template_name_edit.text().strip()
         template_comment = self.template_comment_edit.text().strip()
         
+        # Get the new options
+        preserve_qgis_projects = self.protect_qgis_projects_checkbox.isChecked()
+        exclude_schemas_text = self.exclude_schemas_edit.text().strip()
+        
+        # Parse excluded schemas
+        excluded_schemas = []
+        if exclude_schemas_text:
+            excluded_schemas = [schema.strip() for schema in exclude_schemas_text.split(",") if schema.strip()]
+        
         if not self.validate_selection(self.source_db_combo, "source database"):
             return
         
@@ -305,10 +330,20 @@ class TemplatesTab(BaseTab):
             else:
                 # No active connections, but still show a confirmation
                 confirmation_text = f"Create template '{template_name}' from database '{source_db}'?\n\n"
-                confirmation_text += "This will create a copy of the database structure without data."
+                confirmation_text += "This will create a copy of the database structure with selected data preservation options."
                 
                 if template_comment:
                     confirmation_text += f"\n\nComment: {template_comment}"
+                
+                # Add information about data preservation
+                if preserve_qgis_projects or excluded_schemas:
+                    confirmation_text += "\n\nData preservation settings:"
+                    if preserve_qgis_projects:
+                        confirmation_text += "\n• qgis_projects table data will be preserved"
+                    if excluded_schemas:
+                        confirmation_text += f"\n• Schemas excluded from truncation: {', '.join(excluded_schemas)}"
+                else:
+                    confirmation_text += "\n\nAll table data will be removed (standard template behavior)."
                 
                 reply = QMessageBox.question(
                     self,
@@ -323,7 +358,13 @@ class TemplatesTab(BaseTab):
             
             # Proceed with template creation
             self.emit_progress_started()
-            self.db_manager.create_template(source_db, template_name, template_comment)
+            self.db_manager.create_template(
+                source_db, 
+                template_name, 
+                template_comment,
+                preserve_qgis_projects=preserve_qgis_projects,
+                excluded_schemas=excluded_schemas
+            )
             
         except Exception as e:
             self.emit_log(f"Error checking connections: {str(e)}")
@@ -362,6 +403,9 @@ class TemplatesTab(BaseTab):
                 self.emit_log(f"✓ {message}")
                 self.template_name_edit.clear()
                 self.template_comment_edit.clear()
+                # Reset data preservation options to defaults
+                self.protect_qgis_projects_checkbox.setChecked(True)
+                self.exclude_schemas_edit.setText("listen")
                 self.refresh_templates()
             else:
                 self.emit_log(f"✗ {message}")
