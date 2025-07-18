@@ -262,15 +262,15 @@ class CleanQGSTab(BaseTab):
                 # Auto-resize rows to content
                 self.preview_table.resizeRowsToContents()
                 
-                self.emit_log(f"Preview completed: {len(changes)} datasource(s) with credentials found")
+                self.emit_log(f"Preview completed: {len(changes)} type(s) of credentials found")
             else:
                 # Hide table and show info message
                 self.preview_table.setVisible(False)
                 self.preview_info_label.setVisible(True)
-                self.preview_info_label.setText("No datasources with credentials found in this file.")
+                self.preview_info_label.setText("No credentials found in this file.")
                 self.preview_info_label.setStyleSheet("color: #4CAF50; font-style: italic; padding: 10px;")
                 
-                self.emit_log("Preview completed: No datasources with credentials found")
+                self.emit_log("Preview completed: No credentials found")
             
         except Exception as e:
             self.show_error(f"Error previewing file: {str(e)}")
@@ -315,7 +315,7 @@ class CleanQGSTab(BaseTab):
             self.file_cleaned.emit(cleaned_path)
             
             success_msg = (f"✓ File cleaned successfully!\n"
-                          f"• Cleaned {changes_count} datasource(s)\n"
+                          f"• Removed {changes_count} credential(s)\n"
                           f"• Original file preserved\n"
                           f"• Saved to: {os.path.basename(cleaned_path)}")
             
@@ -372,46 +372,84 @@ class CleanQGSTab(BaseTab):
     def _find_datasource_changes(self, content):
         """Find datasources that would be changed and return before/after pairs."""
         changes = []
+        found_connections = set()  # To avoid duplicates
         
-        # Pattern to match datasource tags with PostgreSQL connections
-        datasource_pattern = r'<datasource>(.*?)</datasource>'
+        # Pattern to find all PostgreSQL connection strings (containing dbname=)
+        # This covers quoted strings, attribute values, and various formats
+        patterns = [
+            r'"[^"]*dbname=[^"]*"',     # Double-quoted strings
+            r"'[^']*dbname=[^']*'",     # Single-quoted strings  
+            r'(?:value|source|dataSource|destinationLayerSource)="([^"]*dbname=[^"]*)"',  # Attribute values
+            r"(?:value|source|dataSource|destinationLayerSource)='([^']*dbname=[^']*)'",  # Single-quoted attribute values
+        ]
         
-        for match in re.finditer(datasource_pattern, content, re.DOTALL):
-            original_datasource = match.group(1).strip()
-            
-            # Check if it's a PostgreSQL connection with credentials
-            if self._has_postgres_credentials(original_datasource):
-                cleaned_datasource = self._clean_single_datasource(original_datasource)
-                if cleaned_datasource != original_datasource:
-                    changes.append((original_datasource, cleaned_datasource))
+        for pattern in patterns:
+            for match in re.finditer(pattern, content):
+                # Get the connection string (either full match or group 1 if it's an attribute)
+                if match.groups():
+                    connection_string = match.group(1)
+                else:
+                    connection_string = match.group(0)
+                
+                # Skip if we've already found this connection string
+                if connection_string in found_connections:
+                    continue
+                
+                # Check if this connection string has credentials we want to remove
+                if self._has_postgres_credentials(connection_string):
+                    cleaned = self._clean_single_datasource(connection_string)
+                    if cleaned != connection_string:
+                        changes.append((connection_string, cleaned))
+                        found_connections.add(connection_string)
         
         return changes
     
     def _clean_datasources(self, content):
         """Clean all datasources in the content and return cleaned content and count."""
         changes_count = 0
+        cleaned_content = content
         
-        def replace_datasource(match):
-            nonlocal changes_count
-            original_datasource = match.group(1).strip()
+        # Global removal of user credentials
+        if self.remove_user_checkbox.isChecked():
+            # Count user credentials before removing them
+            user_matches = re.findall(r'user=[\'"][^\'\"]*[\'"]|user=[^\s]+', cleaned_content)
+            changes_count += len(user_matches)
             
-            if self._has_postgres_credentials(original_datasource):
-                cleaned_datasource = self._clean_single_datasource(original_datasource)
-                if cleaned_datasource != original_datasource:
-                    changes_count += 1
-                    return f'<datasource>{cleaned_datasource}</datasource>'
-            
-            return match.group(0)
+            # Remove user credentials (being very careful about spaces)
+            # Handle space + user= (most common case)
+            cleaned_content = re.sub(r'\s+user=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+            cleaned_content = re.sub(r'\s+user=[^\s]+', '', cleaned_content)
+            # Handle user= + space (when user is first parameter)  
+            cleaned_content = re.sub(r'user=[\'"][^\'\"]*[\'"]\s+', '', cleaned_content)
+            cleaned_content = re.sub(r'user=[^\s]+\s+', '', cleaned_content)
+            # Handle isolated user= (no surrounding spaces)
+            cleaned_content = re.sub(r'user=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+            cleaned_content = re.sub(r'user=[^\s]+', '', cleaned_content)
         
-        # Pattern to match datasource tags
-        datasource_pattern = r'<datasource>(.*?)</datasource>'
-        cleaned_content = re.sub(datasource_pattern, replace_datasource, content, flags=re.DOTALL)
+        # Global removal of password credentials
+        if self.remove_password_checkbox.isChecked():
+            # Count password credentials before removing them
+            password_matches = re.findall(r'password=[\'"][^\'\"]*[\'"]|password=[^\s]+', cleaned_content)
+            changes_count += len(password_matches)
+            
+            # Remove password credentials (being very careful about spaces)
+            # Handle space + password= (most common case)
+            cleaned_content = re.sub(r'\s+password=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+            cleaned_content = re.sub(r'\s+password=[^\s]+', '', cleaned_content)
+            # Handle password= + space (when password is first parameter)
+            cleaned_content = re.sub(r'password=[\'"][^\'\"]*[\'"]\s+', '', cleaned_content)
+            cleaned_content = re.sub(r'password=[^\s]+\s+', '', cleaned_content)
+            # Handle isolated password= (no surrounding spaces)
+            cleaned_content = re.sub(r'password=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+            cleaned_content = re.sub(r'password=[^\s]+', '', cleaned_content)
+        
+        # NO general whitespace cleanup - preserve all XML formatting exactly as is
         
         return cleaned_content, changes_count
     
     def _has_postgres_credentials(self, datasource):
         """Check if datasource has PostgreSQL credentials."""
-        # Check for dbname parameter (indicates PostgreSQL) and credentials
+        # Must have dbname= (indicates PostgreSQL) and credentials we want to remove
         has_dbname = 'dbname=' in datasource
         has_user = 'user=' in datasource and self.remove_user_checkbox.isChecked()
         has_password = 'password=' in datasource and self.remove_password_checkbox.isChecked()
@@ -420,15 +458,16 @@ class CleanQGSTab(BaseTab):
     
     def _clean_single_datasource(self, datasource):
         """Clean a single datasource string."""
+        # This method is less important now, but kept for compatibility
         cleaned = datasource
         
         if self.remove_user_checkbox.isChecked():
-            # Remove user='...' or user="..." 
-            cleaned = re.sub(r"\s*user=['\"][^'\"]*['\"]", "", cleaned)
+            cleaned = re.sub(r'\s*user=[\'"][^\'\"]*[\'"]', '', cleaned)
+            cleaned = re.sub(r'\s*user=[^\s]+', '', cleaned)
         
         if self.remove_password_checkbox.isChecked():
-            # Remove password='...' or password="..."
-            cleaned = re.sub(r"\s*password=['\"][^'\"]*['\"]", "", cleaned)
+            cleaned = re.sub(r'\s*password=[\'"][^\'\"]*[\'"]', '', cleaned)
+            cleaned = re.sub(r'\s*password=[^\s]+', '', cleaned)
         
         # Clean up any double spaces
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
