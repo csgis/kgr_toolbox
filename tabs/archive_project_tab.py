@@ -219,6 +219,7 @@ class ArchiveProjectTab(BaseTab):
             "<li><b>Database snapshots:</b> Data reflects the current state at export time</li>"
             "<li><b>No live sync:</b> Archived data won't update from the original database</li>"
             "<li><b>Security:</b> All database credentials are automatically removed</li>"
+            "<li><b>Path review:</b> Some absolute file paths may require manual review</li>"
             "</ul>"
         )
         
@@ -371,6 +372,189 @@ class ArchiveProjectTab(BaseTab):
             self.emit_log(f"Error during image resizing: {str(e)}")
             return 0
 
+    def _detect_remaining_absolute_paths(self, qgs_path):
+        """Detect and report remaining absolute paths in the project file"""
+        try:
+            with open(str(qgs_path), 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Use simpler, safer patterns to avoid regex hangs
+            found_paths = {}
+            
+            # Look for Windows absolute paths (much simpler pattern)
+            windows_pattern = r'[A-Z]:[/\\][^"\s<>]*'
+            for match in re.findall(windows_pattern, content):
+                if self._is_likely_absolute_path(match):
+                    path_type = self._categorize_path_simple(match)
+                    if path_type not in found_paths:
+                        found_paths[path_type] = set()
+                    found_paths[path_type].add(match)
+            
+            # Look specifically for file:/// URIs (safer pattern)
+            file_uri_pattern = r'file:///[A-Z]:[/\\][^"\s<>]*'
+            for match in re.findall(file_uri_pattern, content):
+                if self._is_likely_absolute_path(match):
+                    path_type = self._categorize_path_simple(match)
+                    if path_type not in found_paths:
+                        found_paths[path_type] = set()
+                    found_paths[path_type].add(match)
+            
+            return found_paths
+            
+        except Exception as e:
+            self.emit_log(f"Error detecting absolute paths: {str(e)}")
+            return {}
+
+    def _is_likely_absolute_path(self, path):
+        """Check if a string is likely to be an absolute file path"""
+        # Skip URLs, XML namespaces, and other non-path strings
+        skip_patterns = [
+            r'^https?://',
+            r'^ftp://',
+            r'xmlns',
+            r'\.xsd$',
+            r'\.dtd$',
+            r'^qgis\.org',
+            r'postgresql://',
+            r'postgis:',
+        ]
+        
+        for pattern in skip_patterns:
+            if re.search(pattern, path, re.IGNORECASE):
+                return False
+        
+        # Check if it looks like a file path
+        return (
+            len(path) > 3 and
+            ('/' in path or '\\' in path) and
+            not path.startswith('www.') and
+            not path.endswith('.org') and
+            not path.endswith('.com')
+        )
+
+    def _categorize_path_simple(self, path):
+        """Categorize the type of absolute path found using simple string checks"""
+        path_lower = path.lower()
+        
+        if '.csv' in path_lower:
+            return 'CSV File References'
+        elif any(ext in path_lower for ext in ['.svg', '.png', '.jpg', '.jpeg', '.tiff', '.pdf']):
+            return 'Image/Document References'
+        elif any(keyword in path_lower for keyword in ['browse', 'export', 'layout']):
+            return 'UI Preferences/Directories'
+        else:
+            return 'Other File Paths'
+
+    def _show_absolute_paths_summary(self, found_paths, output_folder):
+        """Show a summary dialog of remaining absolute paths"""
+        if not found_paths:
+            return
+        
+        # Create summary message
+        summary_parts = [
+            "<h3>⚠️ Manual Review Required</h3>",
+            "<p>The portable project was created successfully, but some absolute file paths remain that may need manual attention:</p>",
+            ""
+        ]
+        
+        total_paths = sum(len(paths) for paths in found_paths.values())
+        
+        for category, paths in found_paths.items():
+            summary_parts.append(f"<h4>{category} ({len(paths)} path(s)):</h4>")
+            summary_parts.append("<ul>")
+            
+            # Show first few paths as examples
+            path_list = list(paths)[:3]  # Show max 3 examples
+            for path in path_list:
+                summary_parts.append(f"<li><code>{path}</code></li>")
+            
+            if len(paths) > 3:
+                summary_parts.append(f"<li><i>... and {len(paths) - 3} more</i></li>")
+            
+            summary_parts.append("</ul>")
+            summary_parts.append("")
+        
+        summary_parts.extend([
+            "<h4>What you should do:</h4>",
+            "<ul>",
+            "<li><b>CSV files:</b> Copy the referenced CSV files to your project folder and update paths to be relative</li>",
+            "<li><b>UI Preferences:</b> These are usually safe to ignore as they're user interface settings</li>",
+            "<li><b>Images/Documents:</b> Copy referenced files to your project folder if needed</li>",
+            "<li><b>Other paths:</b> Review and update as needed for your portable project</li>",
+            "</ul>",
+            "",
+            f"<p><b>Tip:</b> You can search for absolute paths in your project file:<br>",
+            f"<code>{os.path.basename(output_folder)}_portable.qgs</code></p>",
+            "",
+            f"<p><small>Total paths found: {total_paths}</small></p>"
+        ])
+        
+        # Show dialog
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Manual Review Required - Absolute Paths Found")
+        msg.setTextFormat(1)  # Rich text format
+        msg.setText("\n".join(summary_parts))
+        msg.setIcon(QMessageBox.Warning)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setDefaultButton(QMessageBox.Ok)
+        
+        # Make dialog larger
+        msg.setMinimumWidth(600)
+        msg.exec_()
+
+    def _try_convert_csv_paths_to_relative(self, qgs_path, output_folder):
+        """Attempt to convert CSV file paths to relative paths if the files exist in the project"""
+        try:
+            with open(str(qgs_path), 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Use a simpler, more targeted pattern for CSV LayerSource entries
+            csv_pattern = r'<Option name="LayerSource"[^>]*value="file:///([A-Z]:[/\\][^"]*\.csv[^"]*)"'
+            csv_matches = re.findall(csv_pattern, content)
+            
+            if not csv_matches:
+                return 0
+            
+            updated_content = content
+            conversions_made = 0
+            
+            for csv_path in csv_matches:
+                try:
+                    # Extract just the filename
+                    csv_filename = os.path.basename(csv_path.split('?')[0])  # Remove query parameters
+                    
+                    # Check if this CSV file exists in the output folder
+                    potential_csv_path = Path(output_folder) / csv_filename
+                    if potential_csv_path.exists():
+                        # Create relative path
+                        relative_path = f"./{csv_filename}"
+                        query_part = ""
+                        if '?' in csv_path:
+                            query_part = "?" + csv_path.split('?', 1)[1]
+                        
+                        new_source = f"file:///{relative_path}{query_part}"
+                        old_source = f"file:///{csv_path}"
+                        
+                        # Replace in content
+                        updated_content = updated_content.replace(old_source, new_source)
+                        conversions_made += 1
+                        self.emit_log(f"Converted CSV path to relative: {csv_filename}")
+                except Exception as e:
+                    self.emit_log(f"Error processing CSV path {csv_path}: {str(e)}")
+                    continue
+            
+            if conversions_made > 0:
+                # Write updated content back
+                with open(str(qgs_path), 'w', encoding='utf-8') as f:
+                    f.write(updated_content)
+                self.emit_log(f"Successfully converted {conversions_made} CSV path(s) to relative")
+            
+            return conversions_made
+            
+        except Exception as e:
+            self.emit_log(f"Error converting CSV paths: {str(e)}")
+            return 0
+
     def _on_archive_project(self):
         output_folder = self.output_folder_edit.text().strip()
         if not self.validate_non_empty_field(output_folder, "output folder"):
@@ -434,7 +618,7 @@ class ArchiveProjectTab(BaseTab):
             project_dir = project_file.parent
             total_files = len([item for item in project_dir.iterdir() if item.name != project_file.name])
             
-            total_steps = total_files + total_layers + 3  # +3 for project copy, final update, and report creation
+            total_steps = total_files + total_layers + 5  # +5 for project copy, final update, CSV conversion, path detection, and report creation
             current_step = 0
             
             # Switch to determinate progress
@@ -564,7 +748,23 @@ class ArchiveProjectTab(BaseTab):
             current_step += 1
             self.progress_bar.setValue(current_step)
 
-            # 6. Create archive report
+            # 6. Try to convert CSV paths to relative if possible
+            self.progress_label.setText("Converting CSV paths to relative...")
+            csv_conversions = self._try_convert_csv_paths_to_relative(export_path, output_folder)
+            if csv_conversions > 0:
+                self.emit_log(f"Converted {csv_conversions} CSV paths to relative")
+            
+            current_step += 1
+            self.progress_bar.setValue(current_step)
+
+            # 7. Detect remaining absolute paths and inform user
+            self.progress_label.setText("Checking for remaining absolute paths...")
+            remaining_paths = self._detect_remaining_absolute_paths(export_path)
+            
+            current_step += 1
+            self.progress_bar.setValue(current_step)
+
+            # 8. Create archive report
             self.progress_label.setText("Creating archive report...")
             self._create_archive_report(
                 str(output_folder), 
@@ -576,6 +776,13 @@ class ArchiveProjectTab(BaseTab):
 
             self.progress_label.setText("Complete!")
             self.emit_log(f"✓ Successfully archived project '{project_name}' to {export_path}")
+            
+            # Show summary of remaining paths if any found
+            if remaining_paths:
+                self._show_absolute_paths_summary(remaining_paths, output_folder)
+            else:
+                self.emit_log("✓ No remaining absolute paths detected")
+            
             self.project_archived.emit(str(export_path))
             
         except Exception as e:
