@@ -4,6 +4,7 @@ Custom portable QGIS project exporter (no libqfieldsync).
 """
 
 import os
+import re
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -198,6 +199,7 @@ class ArchiveProjectTab(BaseTab):
             "<li><b>PostgreSQL layers →</b> Converted to a single 'data.gpkg' GeoPackage file</li>"
             "<li><b>All project files →</b> Copied to output folder (including DCIM, photos, etc.)</li>"
             "<li><b>Project file →</b> Updated to reference local GeoPackage instead of database</li>"
+            "<li><b>Credentials →</b> Database credentials automatically removed for security</li>"
             "<li><b>Folder structure →</b> Preserved exactly as in original project</li>"
             "</ul>"
             "<h4>Image Resizing (Optional):</h4>"
@@ -216,6 +218,7 @@ class ArchiveProjectTab(BaseTab):
             "<li><b>Image resizing:</b> Processing many high-resolution images can take significant time</li>"
             "<li><b>Database snapshots:</b> Data reflects the current state at export time</li>"
             "<li><b>No live sync:</b> Archived data won't update from the original database</li>"
+            "<li><b>Security:</b> All database credentials are automatically removed</li>"
             "</ul>"
         )
         
@@ -270,6 +273,8 @@ class ArchiveProjectTab(BaseTab):
                 "- PostgreSQL layers converted to GeoPackage format",
                 "- All project files and folders copied to output directory",
                 "- Project file updated to reference local data sources",
+                "- Database credentials removed for security",
+                "- All PostgreSQL references converted to GeoPackage",
             ]
             
             # Add image resizing info if applicable
@@ -387,7 +392,8 @@ class ArchiveProjectTab(BaseTab):
             "This includes:",
             "• DCIM folder (which might be quite large)",
             "• All other project files and folders",
-            "• PostgreSQL layers will be converted to Geopackage"
+            "• PostgreSQL layers will be converted to Geopackage",
+            "• Database credentials will be automatically removed"
         ]
         
         # Add image resizing warning if enabled
@@ -539,7 +545,8 @@ class ArchiveProjectTab(BaseTab):
                     )
                     
                     if error == QgsVectorFileWriter.NoError:
-                        new_source = f"{gpkg_path}|layername={layer_name}"
+                        # Use relative path since GeoPackage is always next to QGS file
+                        new_source = f"data.gpkg|layername={layer_name}"
                         new_layer_sources[layer_id] = new_source
                         self.emit_log(f"Exported {layer.name()} to geopackage")
                     else:
@@ -548,11 +555,11 @@ class ArchiveProjectTab(BaseTab):
                     current_step += 1
                     self.progress_bar.setValue(current_step)
 
-            # 5. Update the copied project file to point to geopackage
+            # 5. Update the copied project file to point to geopackage and clean credentials
             self.progress_label.setText("Updating project file...")
             if new_layer_sources:
-                self._update_project_sources(export_path, new_layer_sources, postgresql_layers)
-                self.emit_log("Updated project file to use geopackage sources")
+                self._update_project_sources_comprehensive(export_path, new_layer_sources, postgresql_layers, str(gpkg_path))
+                self.emit_log("Updated project file to use geopackage sources and removed credentials")
             
             current_step += 1
             self.progress_bar.setValue(current_step)
@@ -579,16 +586,61 @@ class ArchiveProjectTab(BaseTab):
             self.progress_bar.setVisible(False)
             self.archive_btn.setEnabled(True)
 
-    def _update_project_sources(self, qgs_path, new_sources, postgresql_layers):
-        """Update the project file to use geopackage sources instead of PostgreSQL"""
+    def _clean_credentials_from_content(self, content):
+        """Clean database credentials from QGS content using similar logic as clean_qgs_tab.py"""
+        changes_count = 0
+        cleaned_content = content
+        
+        # Remove user credentials
+        user_matches = re.findall(r'user=[\'"][^\'\"]*[\'"]|user=[^\s]+', cleaned_content)
+        changes_count += len(user_matches)
+        
+        # Remove user credentials (being very careful about spaces)
+        cleaned_content = re.sub(r'\s+user=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+        cleaned_content = re.sub(r'\s+user=[^\s]+', '', cleaned_content)
+        cleaned_content = re.sub(r'user=[\'"][^\'\"]*[\'"]\s+', '', cleaned_content)
+        cleaned_content = re.sub(r'user=[^\s]+\s+', '', cleaned_content)
+        cleaned_content = re.sub(r'user=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+        cleaned_content = re.sub(r'user=[^\s]+', '', cleaned_content)
+        
+        # Remove password credentials
+        password_matches = re.findall(r'password=[\'"][^\'\"]*[\'"]|password=[^\s]+', cleaned_content)
+        changes_count += len(password_matches)
+        
+        # Remove password credentials (being very careful about spaces)
+        cleaned_content = re.sub(r'\s+password=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+        cleaned_content = re.sub(r'\s+password=[^\s]+', '', cleaned_content)
+        cleaned_content = re.sub(r'password=[\'"][^\'\"]*[\'"]\s+', '', cleaned_content)
+        cleaned_content = re.sub(r'password=[^\s]+\s+', '', cleaned_content)
+        cleaned_content = re.sub(r'password=[\'"][^\'\"]*[\'"]', '', cleaned_content)
+        cleaned_content = re.sub(r'password=[^\s]+', '', cleaned_content)
+        
+        return cleaned_content, changes_count
+
+    def _update_project_sources_comprehensive(self, qgs_path, new_sources, postgresql_layers, gpkg_path):
+        """Comprehensive update of the project file to use geopackage sources and remove all PostgreSQL references"""
         try:
-            # Parse the QGS file (XML)
-            tree = ET.parse(str(qgs_path))
-            root = tree.getroot()
+            # Read the file content
+            with open(str(qgs_path), 'r', encoding='utf-8') as f:
+                content = f.read()
             
-            # Find all maplayer elements
+            # Clean database credentials first
+            content, creds_removed = self._clean_credentials_from_content(content)
+            if creds_removed > 0:
+                self.emit_log(f"Removed {creds_removed} database credential(s)")
+            
+            # Parse the XML
+            root = ET.fromstring(content)
+            
+            # Create layer ID to layer name mapping for easier lookup
+            layer_id_to_name = {}
+            for layer_id, layer in QgsProject.instance().mapLayers().items():
+                if layer_id in new_sources:
+                    layer_name = layer.name().replace(' ', '_').replace('/', '_')
+                    layer_id_to_name[layer_id] = layer_name
+            
+            # 1. Update basic maplayer elements
             maplayers = root.findall(".//maplayer")
-            
             for maplayer in maplayers:
                 layer_id = maplayer.get("id") or maplayer.findtext("id")
                 
@@ -603,10 +655,103 @@ class ArchiveProjectTab(BaseTab):
                     if provider_elem is not None:
                         provider_elem.text = "ogr"
                     
-                    self.emit_log(f"Updated layer {layer_id} source in project file")
+                    self.emit_log(f"Updated maplayer {layer_id} source in project file")
+            
+            # 2. Update layer-tree-layer elements (providerKey and source attributes)
+            layer_tree_layers = root.findall(".//layer-tree-layer")
+            for layer_tree_layer in layer_tree_layers:
+                layer_id = layer_tree_layer.get("id")
+                
+                if layer_id in new_sources:
+                    # Update providerKey attribute
+                    layer_tree_layer.set("providerKey", "ogr")
+                    
+                    # Update source attribute
+                    layer_tree_layer.set("source", new_sources[layer_id])
+                    
+                    self.emit_log(f"Updated layer-tree-layer {layer_id} in project file")
+            
+            # 3. Update relation elements
+            relations = root.findall(".//relation")
+            for relation in relations:
+                # Update referencingLayer dataSource
+                referencing_layer = relation.get("referencingLayer")
+                if referencing_layer in new_sources:
+                    relation.set("dataSource", new_sources[referencing_layer])
+                
+                # Update referencedLayer dataSource  
+                referenced_layer = relation.get("referencedLayer")
+                if referenced_layer in new_sources:
+                    relation.set("dataSource", new_sources[referenced_layer])
+                
+                # Update providerKey
+                if referencing_layer in new_sources or referenced_layer in new_sources:
+                    relation.set("providerKey", "ogr")
+            
+            # 4. Update Layer elements in project styles
+            layer_elements = root.findall(".//Layer")
+            for layer_elem in layer_elements:
+                source = layer_elem.get("source")
+                if source and ("postgres" in source.lower() or "dbname=" in source):
+                    # Try to find matching layer by source pattern
+                    for layer_id, new_source in new_sources.items():
+                        # This is a simplified matching - you might want to improve this
+                        if layer_id in source or any(part in source for part in source.split()):
+                            layer_elem.set("source", new_source)
+                            layer_elem.set("provider", "ogr")
+                            break
+            
+            # 5. Update LayerStyle elements
+            layer_styles = root.findall(".//LayerStyle")
+            for layer_style in layer_styles:
+                layer_id = layer_style.get("layerid")
+                if layer_id in new_sources:
+                    layer_style.set("source", new_sources[layer_id])
+                    layer_style.set("provider", "ogr")
+            
+            # 6. Update Atlas configuration
+            atlas = root.find(".//Atlas")
+            if atlas is not None:
+                coverage_layer = atlas.get("coverageLayer")
+                if coverage_layer in new_sources:
+                    atlas.set("coverageLayer", coverage_layer)
+                    atlas.set("coverageLayerSource", new_sources[coverage_layer])
+                    atlas.set("coverageLayerProvider", "ogr")
+            
+            # 7. Update GPS settings
+            gps_settings = root.find(".//ProjectGpsSettings")
+            if gps_settings is not None:
+                dest_layer = gps_settings.get("destinationLayer")
+                if dest_layer in new_sources:
+                    gps_settings.set("destinationLayerSource", new_sources[dest_layer])
+                    gps_settings.set("destinationLayerProvider", "ogr")
+            
+            # 8. Update Option elements with LayerProviderName
+            option_elements = root.findall(".//Option[@name='LayerProviderName']")
+            for option_elem in option_elements:
+                if option_elem.get("value") == "postgres":
+                    option_elem.set("value", "ogr")
+            
+            # 9. Clean up any remaining PostgreSQL references in the serialized content
+            content = ET.tostring(root, encoding='unicode')
+            
+            # Additional text-based cleanup for any missed references
+            # Replace remaining postgres provider references
+            content = re.sub(r'providerKey="postgres"', 'providerKey="ogr"', content)
+            content = re.sub(r"providerKey='postgres'", "providerKey='ogr'", content)
+            content = re.sub(r'provider="postgres"', 'provider="ogr"', content)
+            content = re.sub(r"provider='postgres'", "provider='ogr'", content)
+            
+            # Replace LayerProviderName values
+            content = re.sub(r'<Option name="LayerProviderName" type="QString" value="postgres" />',
+                           '<Option name="LayerProviderName" type="QString" value="ogr" />', content)
             
             # Write the updated XML back to file
-            tree.write(str(qgs_path), encoding='utf-8', xml_declaration=True)
+            with open(str(qgs_path), 'w', encoding='utf-8') as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write(content)
+            
+            self.emit_log("Comprehensive project file update completed")
             
         except Exception as e:
             self.emit_log(f"Error updating project file: {str(e)}")
