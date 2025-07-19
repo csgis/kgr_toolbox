@@ -158,7 +158,7 @@ class TemplatesTab(BaseTab):
         create_layout.addRow("Template Name:", self.template_name_edit)
         create_layout.addRow("Comment:", self.template_comment_edit)
         create_layout.addRow("", self.protect_qgis_projects_checkbox)
-        create_layout.addRow("Exclude Schemas:", self.exclude_schemas_edit)
+        create_layout.addRow("Exclude Schemas <br>from truncate:", self.exclude_schemas_edit)
         create_layout.addWidget(self.create_template_btn)
         
         layout.addWidget(create_group)
