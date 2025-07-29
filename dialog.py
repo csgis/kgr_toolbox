@@ -62,8 +62,8 @@ class KgrToolBoxDialog(QDockWidget):
         self.tab_widget.addTab(self.connection_tab, "Connection")
         self.tab_widget.addTab(self.templates_tab, "Templates")
         self.tab_widget.addTab(self.databases_tab, "Databases")
-        self.tab_widget.addTab(self.truncate_tab, "Truncate Tables")
         self.tab_widget.addTab(self.qgis_projects_tab, "Fix QGIS Project Layers")
+        self.tab_widget.addTab(self.truncate_tab, "Truncate Tables")
         self.tab_widget.addTab(self.archive_project_tab, "Archive Project")
         self.tab_widget.addTab(self.clean_qgs_tab, "Clean QGS Files")
 

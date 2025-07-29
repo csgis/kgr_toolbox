@@ -446,17 +446,17 @@ class DatabaseManager(QObject):
             
             # Step 3: DISABLED - Upload fixed content back to database
             # Commenting out the upload for debugging purposes
-            self.progress_updated.emit("SKIPPING UPLOAD - Debug mode enabled")
+            # self.progress_updated.emit("SKIPPING UPLOAD - Debug mode enabled")
             self.progress_updated.emit("Both original and modified QGS files have been saved for comparison")
             
-            # success = self._upload_project_content(database_name, schema, table, project_name, fixed_content)
-            # if success:
-            #     self.operation_finished.emit(True, f"Successfully fixed project '{project_name}'")
-            # else:
-            #     self.operation_finished.emit(False, "Failed to upload fixed project content")
+            success = self._upload_project_content(database_name, schema, table, project_name, fixed_content)
+            if success:
+                self.operation_finished.emit(True, f"Successfully fixed project '{project_name}'")
+            else:
+                self.operation_finished.emit(False, "Failed to upload fixed project content")
             
             # Instead, just report success with debug info
-            self.operation_finished.emit(True, f"Debug mode: Project '{project_name}' processed successfully. Files saved for comparison. Upload was SKIPPED.")
+            # self.operation_finished.emit(True, f"Debug mode: Project '{project_name}' processed successfully. Files saved for comparison. Upload was SKIPPED.")
                 
         except Exception as e:
             error_msg = f"Error fixing QGIS project: {str(e)}"
