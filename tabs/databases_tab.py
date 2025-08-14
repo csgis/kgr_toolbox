@@ -408,8 +408,6 @@ class DatabasesTab(BaseTab):
         msg.setTextFormat(1)  # Rich text format
         msg.setText(help_text)
         msg.setStandardButtons(QMessageBox.Ok)
-        
-        # Make dialog larger to accommodate more text
         msg.resize(700, 600)
         msg.exec_()
     

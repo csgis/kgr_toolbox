@@ -140,7 +140,7 @@ class CleanQGSTab(BaseTab):
         # Set maximum height and word wrap
         self.preview_table.setMaximumHeight(250)
         self.preview_table.setWordWrap(True)
-        self.preview_table.setTextElideMode(3)  # ElideNone - don't truncate
+        self.preview_table.setTextElideMode(3)
         
         # Add placeholder message
         self.preview_info_label = QLabel("Select a file and click 'Preview Changes' to see what will be modified...")
@@ -441,9 +441,7 @@ class CleanQGSTab(BaseTab):
             # Handle isolated password= (no surrounding spaces)
             cleaned_content = re.sub(r'password=[\'"][^\'\"]*[\'"]', '', cleaned_content)
             cleaned_content = re.sub(r'password=[^\s]+', '', cleaned_content)
-        
-        # NO general whitespace cleanup - preserve all XML formatting exactly as is
-        
+                
         return cleaned_content, changes_count
     
     def _has_postgres_credentials(self, datasource):

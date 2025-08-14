@@ -13,6 +13,14 @@ A QGIS plugin for managing PostgreSQL database templates and creating portable p
 - **PostgreSQL to Geopackage**: Convert all PostgreSQL layers to a single portable geopackage
 - **Complete Project Export**: Copy all project files including DCIM folders and media and updates source references
 
+### Qgis Projects
+- **Fix QGIS Project Layers**: Search and update database connection configuration in layers.
+- **Clean QGS Files**: Remove username and password in case they have been saved within the project file
+- 
+### PostgreSQL Database
+- **Truncate Tables**: Truncate tables, to have a fresh start with duplicated databases
+
+
 ## Installation
 
 ### From QGIS Plugin Repository
@@ -23,50 +31,20 @@ A QGIS plugin for managing PostgreSQL database templates and creating portable p
 
 ### Manual Installation
 1. Download the latest release from [GitHub Releases](https://github.com/csgis/postgresql-template-manager/releases)
-2. Extract the zip file to your QGIS plugins directory:
-   - **Windows**: `C:\Users\[username]\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\`
-   - **macOS**: `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
-   - **Linux**: `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
-3. Restart QGIS
-4. Enable the plugin in `Plugins` → `Manage and Install Plugins` → `Installed`
+2. Go to `Plugins` → `Manage and Install Plugins`
+3. Upload the zip
 
 ## Usage
 
-### PostgreSQL Template Management
 
-#### Creating a Template
+#### Most of the actions need a database connection. Use a highly priviliged user to work with templates and databases.
 1. Open the KGR Toolbox plugin
 2. Go to the **Database Connection** tab
 3. Enter your PostgreSQL connection details
 4. Click **Test Connection**
-5. Switch to the **Create Template** tab
-6. Select source database and enter template name
-7. Click **Create Template**
 
-#### Deploying from Template
-1. Ensure your connection is configured
-2. Go to the **Create Template** tab
-3. Select the template database
-4. Enter new database name
-5. Click **Create Database**
+For all other actions click the help button in the upper right corner of each tab.
 
-### Creating Portable Archives
-
-#### Export Project Archive
-1. Open your QGIS project with PostgreSQL layers
-2. Open the KGR Toolbox plugin
-3. Go to the **Archive Project** tab
-4. Select output folder
-5. Click **Create Portable Archive**
-
-The plugin will:
-- Copy all project files and folders (including DCIM)
-- Convert all PostgreSQL layers to a single geopackage
-- Update the project file to use geopackage sources
-- Create a portable `_portable.qgs` file
-
-#### Warning
-The archive process copies ALL files from your project directory, including DCIM folders which may be quite large. Choose your output location carefully.
 
 ## Requirements
 
@@ -74,74 +52,6 @@ The archive process copies ALL files from your project directory, including DCIM
 - PostgreSQL database with appropriate permissions
 - Python 3.6+ (included with QGIS)
 
-## Technical Details
-
-### Manual Template Creation
-
-If you prefer to create templates manually, you can execute these SQL commands directly in any PostgreSQL client (DBeaver, pgAdmin, etc.):
-
-```sql
--- 1. Connect to postgres database and terminate active connections to source database
-SELECT pg_terminate_backend(pid) 
-FROM pg_stat_activity 
-WHERE datname = 'source_database_name' 
-  AND pid != pg_backend_pid();
-
--- 2. Create template database
-CREATE DATABASE "template_database_name" 
-WITH TEMPLATE "source_database_name" 
-     IS_TEMPLATE = true;
-
--- 3. Connect to the template database
-
--- 4. Truncate all user tables to remove data while preserving structure
-DO $$
-DECLARE
-    table_record RECORD;
-BEGIN
-    FOR table_record IN 
-        SELECT schemaname, tablename 
-        FROM pg_tables 
-        WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-        ORDER BY schemaname, tablename
-    LOOP
-        EXECUTE format('TRUNCATE TABLE %I.%I CASCADE;', 
-                      table_record.schemaname, 
-                      table_record.tablename);
-        RAISE NOTICE 'Cleared data from %.%', 
-                     table_record.schemaname, 
-                     table_record.tablename;
-    END LOOP;
-END $$;
-```
-
-**Template Deployment:**
-```sql
--- Create new database from template
-CREATE DATABASE "new_database_name" 
-WITH TEMPLATE "template_database_name";
-```
-
-**Template Deletion:**
-```sql
--- Deactivate template status first
-UPDATE pg_database 
-SET datistemplate = false 
-WHERE datname = 'template_database_name';
-
-```sql
--- Deactivate connections
-SELECT pg_terminate_backend(pid) 
-FROM pg_stat_activity 
-WHERE datname = 'source_database_name' or datname = 'new_database_name'
-  AND pid != pg_backend_pid();
-
--- Drop the template database
-DROP DATABASE "template_database_name";
-
--- Drop the new database
-DROP DATABASE "new_database_name";
-```
 
 ## Troubleshooting
 

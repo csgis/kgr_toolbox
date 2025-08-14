@@ -153,7 +153,7 @@ class ConnectionTab(BaseTab):
         """Handle operation finished signal."""
         self.emit_progress_finished()
         
-        if "Connection" in message:  # This is a connection test result
+        if "Connection" in message:
             if success:
                 self.conn_status.setText("Connected")
                 self.conn_status.setStyleSheet("color: green;")

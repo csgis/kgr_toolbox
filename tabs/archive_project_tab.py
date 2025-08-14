@@ -377,10 +377,9 @@ class ArchiveProjectTab(BaseTab):
             with open(str(qgs_path), 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Use simpler, safer patterns to avoid regex hangs
             found_paths = {}
             
-            # Look for Windows absolute paths (much simpler pattern)
+            # Look for Windows absolute paths
             windows_pattern = r'[A-Z]:[/\\][^"\s<>]*'
             for match in re.findall(windows_pattern, content):
                 if self._is_likely_absolute_path(match):
@@ -389,7 +388,7 @@ class ArchiveProjectTab(BaseTab):
                         found_paths[path_type] = set()
                     found_paths[path_type].add(match)
             
-            # Look specifically for file:/// URIs (safer pattern)
+            # Look specifically for file:/// URIs
             file_uri_pattern = r'file:///[A-Z]:[/\\][^"\s<>]*'
             for match in re.findall(file_uri_pattern, content):
                 if self._is_likely_absolute_path(match):
@@ -507,7 +506,7 @@ class ArchiveProjectTab(BaseTab):
             with open(str(qgs_path), 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Use a simpler, more targeted pattern for CSV LayerSource entries
+            # Use targeted pattern for CSV LayerSource entries
             csv_pattern = r'<Option name="LayerSource"[^>]*value="file:///([A-Z]:[/\\][^"]*\.csv[^"]*)"'
             csv_matches = re.findall(csv_pattern, content)
             

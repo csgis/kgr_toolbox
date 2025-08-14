@@ -58,7 +58,7 @@ class QGISProjectsTab(BaseTab):
         db_select_layout = QHBoxLayout()
         self.qgis_db_combo = QComboBox()
         self.refresh_qgis_db_btn = QPushButton("Refresh")
-        # FIX: Use lambda to ignore the boolean argument from clicked signal
+
         self.refresh_qgis_db_btn.clicked.connect(lambda: self.refresh_qgis_databases())
         self.search_projects_btn = QPushButton("Search Projects")
         self.search_projects_btn.clicked.connect(self.search_qgis_projects)
@@ -102,11 +102,7 @@ class QGISProjectsTab(BaseTab):
         params_layout.addRow("New User:", self.new_user_edit)
         params_layout.addRow("New Port:", self.new_port_edit)
         params_layout.addRow("New Password:", self.new_password_edit)
-        
-
         params_layout.addRow("<b>Schema Remapping:</b>", None)
-
-        
         params_layout.addRow("Source Schema (old):", self.source_schema_edit)
         params_layout.addRow("Target Schema (new):", self.target_schema_edit)
         
